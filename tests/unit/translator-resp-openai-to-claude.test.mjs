@@ -200,6 +200,72 @@ test("OpenAI non-stream: chat completion becomes Claude message with thinking an
   });
 });
 
+test("OpenAI non-stream: empty assistant message stays semantically empty", () => {
+  const result = translateNonStreamingResponse(
+    {
+      id: "chatcmpl-empty",
+      object: "chat.completion",
+      model: "gpt-4.1",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+          },
+          finish_reason: "stop",
+        },
+      ],
+      usage: {
+        prompt_tokens: 2,
+        completion_tokens: 0,
+      },
+    },
+    FORMATS.OPENAI,
+    FORMATS.CLAUDE
+  );
+
+  assert.equal(result.content.length, 1);
+  assert.equal(result.content[0].type, "text");
+  assert.equal(result.content[0].text, "");
+  assert.equal(result.content[0].text.includes("empty response"), false);
+});
+
+test("OpenAI stream: cache subtraction clamps input tokens at zero", () => {
+  const result = flatten([
+    openaiToClaudeResponse(
+      {
+        id: "chatcmpl-underflow",
+        model: "gpt-4.1",
+        choices: [{ index: 0, delta: { content: "Hi" }, finish_reason: null }],
+      },
+      createState()
+    ),
+    openaiToClaudeResponse(
+      {
+        id: "chatcmpl-underflow",
+        model: "gpt-4.1",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: {
+          prompt_tokens: 2,
+          completion_tokens: 1,
+          prompt_tokens_details: {
+            cached_tokens: 3,
+            cache_creation_tokens: 4,
+          },
+        },
+      },
+      createState()
+    ),
+  ]);
+
+  const messageDelta = result.find((item) => item.type === "message_delta");
+  assert.ok(messageDelta);
+  assert.equal(messageDelta.usage.input_tokens, 0);
+  assert.equal(messageDelta.usage.output_tokens, 1);
+  assert.equal(messageDelta.usage.cache_read_input_tokens, 3);
+  assert.equal(messageDelta.usage.cache_creation_input_tokens, 4);
+});
+
 test("OpenAI stream: null chunk is ignored", () => {
   assert.equal(openaiToClaudeResponse(null, createState()), null);
 });

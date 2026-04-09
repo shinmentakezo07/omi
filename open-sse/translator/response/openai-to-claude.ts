@@ -46,7 +46,8 @@ export function openaiToClaudeResponse(chunk, state) {
 
     // input_tokens = prompt_tokens - cached_tokens - cache_creation_tokens
     // Because OpenAI's prompt_tokens includes all prompt-side tokens
-    const inputTokens = promptTokens - cacheReadTokens - cacheCreateTokens;
+    // Clamp to zero to tolerate inconsistent upstream accounting.
+    const inputTokens = Math.max(0, promptTokens - cacheReadTokens - cacheCreateTokens);
 
     state.usage = {
       input_tokens: inputTokens,

@@ -106,11 +106,15 @@ test("CodexExecutor.transformRequest preserves compact requests and native passt
 
   try {
     const body = {
+      model: "gpt-5.3-codex-high",
       _nativeCodexPassthrough: true,
       instructions: "keep this",
       stream: false,
+      prompt_cache_retention: { type: "ephemeral" },
+      metadata: { source: "cursor" },
+      user: "cursor",
     };
-    const result = executor.transformRequest("gpt-5.3-codex", body, false, {
+    const result = executor.transformRequest("gpt-5.3-codex-high", body, false, {
       requestEndpointPath: "/responses/compact",
     });
 
@@ -119,6 +123,11 @@ test("CodexExecutor.transformRequest preserves compact requests and native passt
     assert.equal(result.service_tier, "priority");
     assert.equal(result.store, false);
     assert.equal(result.instructions, "keep this");
+    assert.equal(result.model, "gpt-5.3-codex");
+    assert.deepEqual(result.reasoning, { effort: "high" });
+    assert.equal(result.prompt_cache_retention, undefined);
+    assert.equal(result.metadata, undefined);
+    assert.equal(result.user, undefined);
   } finally {
     setDefaultFastServiceTierEnabled(false);
   }

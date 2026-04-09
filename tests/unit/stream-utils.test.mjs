@@ -407,6 +407,151 @@ test("createSSEStream passthrough merges Claude usage chunks and restores mapped
   assert.equal(onCompletePayload.responseBody.usage.total_tokens, 10);
 });
 
+test("createSSEStream emits bounded debug logs for repeated passthrough parse errors", async () => {
+  const originalDebug = process.env.DEBUG_STREAM_ERRORS;
+  const originalWarn = console.warn;
+  const warnings = [];
+
+  process.env.DEBUG_STREAM_ERRORS = "true";
+  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+
+  try {
+    await readTransformed(
+      ['data: {"broken":\n\n', 'data: {"broken":\n\n', 'data: {"broken":\n\n', 'data: {"broken":\n\n'],
+      {
+        mode: "passthrough",
+        sourceFormat: FORMATS.OPENAI,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        body: { messages: [{ role: "user", content: "hello" }] },
+      }
+    );
+  } finally {
+    console.warn = originalWarn;
+    if (originalDebug === undefined) delete process.env.DEBUG_STREAM_ERRORS;
+    else process.env.DEBUG_STREAM_ERRORS = originalDebug;
+  }
+
+  const detailWarnings = warnings.filter(
+    (warning) =>
+      warning.includes("[STREAM_DEBUG] passthrough chunk parse/sanitize") &&
+      !warning.includes("reached log limit")
+  );
+  assert.equal(detailWarnings.length, 3);
+  assert.ok(warnings.some((warning) => warning.includes("reached log limit (3)")));
+});
+
+test("createSSEStream logs passthrough onComplete callback failures when debug logging is enabled", async () => {
+  const originalDebug = process.env.DEBUG_STREAM_ERRORS;
+  const originalWarn = console.warn;
+  const warnings = [];
+
+  process.env.DEBUG_STREAM_ERRORS = "true";
+  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+
+  try {
+    await readTransformed(
+      [
+        `data: ${JSON.stringify({
+          id: "chatcmpl_debug_passthrough",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "gpt-4.1-mini",
+          choices: [{ index: 0, delta: { content: "Hello" }, finish_reason: null }],
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          id: "chatcmpl_debug_passthrough",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: "gpt-4.1-mini",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+        })}\n\n`,
+      ],
+      {
+        mode: "passthrough",
+        sourceFormat: FORMATS.OPENAI,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        body: { messages: [{ role: "user", content: "hello" }] },
+        onComplete() {
+          throw new Error("passthrough callback failed");
+        },
+      }
+    );
+  } finally {
+    console.warn = originalWarn;
+    if (originalDebug === undefined) delete process.env.DEBUG_STREAM_ERRORS;
+    else process.env.DEBUG_STREAM_ERRORS = originalDebug;
+  }
+
+  assert.ok(
+    warnings.some((warning) =>
+      warning.includes("[STREAM_DEBUG] passthrough onComplete callback")
+    )
+  );
+});
+
+test("createSSEStream logs translate onComplete callback failures when debug logging is enabled", async () => {
+  const originalDebug = process.env.DEBUG_STREAM_ERRORS;
+  const originalWarn = console.warn;
+  const warnings = [];
+
+  process.env.DEBUG_STREAM_ERRORS = "true";
+  console.warn = (...args) => warnings.push(args.map(String).join(" "));
+
+  try {
+    await readTransformed(
+      [
+        `data: ${JSON.stringify({
+          type: "message_start",
+          message: {
+            id: "msg_debug_translate",
+            model: "claude-sonnet-4",
+            role: "assistant",
+            usage: { input_tokens: 3 },
+          },
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "Hello Claude" },
+        })}\n\n`,
+        `data: ${JSON.stringify({
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { output_tokens: 4 },
+        })}\n\n`,
+        `data: ${JSON.stringify({ type: "message_stop" })}\n\n`,
+      ],
+      {
+        mode: "translate",
+        targetFormat: FORMATS.CLAUDE,
+        sourceFormat: FORMATS.OPENAI,
+        provider: "claude",
+        model: "claude-sonnet-4",
+        body: { messages: [{ role: "user", content: "hello" }] },
+        onComplete() {
+          throw new Error("translate callback failed");
+        },
+      }
+    );
+  } finally {
+    console.warn = originalWarn;
+    if (originalDebug === undefined) delete process.env.DEBUG_STREAM_ERRORS;
+    else process.env.DEBUG_STREAM_ERRORS = originalDebug;
+  }
+
+  assert.ok(
+    warnings.some((warning) => warning.includes("[STREAM_DEBUG] translate onComplete callback"))
+  );
+});
+
 test("createSSETransformStreamWithLogger flushes a trailing Claude usage event without a newline", async () => {
   let onCompletePayload = null;
   const text = await readWithTransform(

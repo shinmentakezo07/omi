@@ -1,3 +1,14 @@
+---
+title: OmniRoute
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 20128
+pinned: false
+short_description: Unified AI proxy with routing and fallback.
+---
+
 # 🚀 OmniRoute — The Free AI Gateway
 
 ### Never stop coding. Smart routing to **FREE & low-cost AI models** with automatic fallback.

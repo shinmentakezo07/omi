@@ -187,6 +187,41 @@ export function createSSEStream(options: StreamOptions = {}) {
   let idleTimer: ReturnType<typeof setInterval> | null = null;
   let streamTimedOut = false;
 
+  // Debug-only bounded error logging for swallowed/optional branches.
+  // Enable with DEBUG_STREAM_ERRORS=true.
+  const streamDebugEnabled = process.env.DEBUG_STREAM_ERRORS === "true";
+  const streamDebugLimit = 3;
+  type StreamDebugCounters = {
+    parse: number;
+    onCompletePassthrough: number;
+    onCompleteTranslate: number;
+  };
+  const streamDebugCounters: StreamDebugCounters = {
+    parse: 0,
+    onCompletePassthrough: 0,
+    onCompleteTranslate: 0,
+  };
+  const logStreamDebug = (
+    key: keyof StreamDebugCounters,
+    error: unknown,
+    context: string
+  ) => {
+    if (!streamDebugEnabled) return;
+    if (streamDebugCounters[key] >= streamDebugLimit) return;
+
+    streamDebugCounters[key] += 1;
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `[STREAM_DEBUG] ${context} (${provider || "provider"}:${model || "unknown"}) - ${detail}`
+    );
+
+    if (streamDebugCounters[key] === streamDebugLimit) {
+      console.warn(
+        `[STREAM_DEBUG] ${context} reached log limit (${streamDebugLimit}) for this stream`
+      );
+    }
+  };
+
   return new TransformStream(
     {
       start(controller) {
@@ -445,7 +480,9 @@ export function createSSEStream(options: StreamOptions = {}) {
                 }
 
                 clientPayload = parsed;
-              } catch {}
+              } catch (error) {
+                logStreamDebug("parse", error, "passthrough chunk parse/sanitize");
+              }
             }
 
             if (!injectedUsage) {
@@ -741,7 +778,9 @@ export function createSSEStream(options: StreamOptions = {}) {
                     includeEvents: false,
                   }),
                 });
-              } catch {}
+              } catch (error) {
+                logStreamDebug("onCompletePassthrough", error, "passthrough onComplete callback");
+              }
             }
             return;
           }
@@ -906,10 +945,12 @@ export function createSSEStream(options: StreamOptions = {}) {
                   includeEvents: false,
                 }),
               });
-            } catch {}
+            } catch (error) {
+              logStreamDebug("onCompleteTranslate", error, "translate onComplete callback");
+            }
           }
         } catch (error) {
-          console.log(`[STREAM] Error in flush (${model || "unknown"}):`, error.message || error);
+          console.warn(`[STREAM] Error in flush (${model || "unknown"}):`, error.message || error);
         }
       },
     },

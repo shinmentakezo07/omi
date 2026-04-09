@@ -232,6 +232,22 @@ test("Chat -> Responses converts messages, tool calls, tool outputs, tools and p
   assert.equal(result.top_p, 0.9);
 });
 
+test("Chat -> Responses preserves prompt_cache_key and maps reasoning_effort to reasoning", () => {
+  const result = openaiToOpenAIResponsesRequest(
+    "gpt-5.2-codex",
+    {
+      messages: [{ role: "user", content: "Hello" }],
+      prompt_cache_key: "omni-cache-key",
+      reasoning_effort: "high",
+    },
+    false,
+    null
+  );
+
+  assert.equal(result.prompt_cache_key, "omni-cache-key");
+  assert.deepEqual(result.reasoning, { effort: "high" });
+});
+
 test("Chat -> Responses filters orphan function_call_output items and leaves empty instructions when absent", () => {
   const result = openaiToOpenAIResponsesRequest(
     "gpt-4o",

@@ -435,9 +435,21 @@ export class CodexExecutor extends BaseExecutor {
     delete body.messages;
     delete body.prompt;
 
-    if (nativeCodexPassthrough) {
-      return body;
-    }
+    // Remove unsupported parameters for Codex API on both native passthrough and translated paths.
+    delete body.temperature;
+    delete body.top_p;
+    delete body.frequency_penalty;
+    delete body.presence_penalty;
+    delete body.logprobs;
+    delete body.top_logprobs;
+    delete body.n;
+    delete body.seed;
+    delete body.max_tokens;
+    delete body.user; // Cursor sends this but Codex doesn't support it
+    delete body.prompt_cache_retention; // Cursor sends this but Codex doesn't support it
+    delete body.metadata; // Cursor sends this but Codex doesn't support it
+    delete body.stream_options; // Cursor sends this but Codex doesn't support it
+    delete body.safety_identifier; // Droid CLI sends this but Codex doesn't support it
 
     // Extract thinking level from model name suffix
     // e.g., gpt-5.3-codex-high → high, gpt-5.3-codex → medium (default)
@@ -455,6 +467,8 @@ export class CodexExecutor extends BaseExecutor {
       }
     }
 
+    // Apply reasoning normalization on both native passthrough and translated paths
+    // so proxy behavior matches direct Codex usage.
     // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
     if (!body.reasoning) {
       const rawEffort = body.reasoning_effort || modelEffort || "medium";
@@ -467,21 +481,9 @@ export class CodexExecutor extends BaseExecutor {
     }
     delete body.reasoning_effort;
 
-    // Remove unsupported parameters for Codex API
-    delete body.temperature;
-    delete body.top_p;
-    delete body.frequency_penalty;
-    delete body.presence_penalty;
-    delete body.logprobs;
-    delete body.top_logprobs;
-    delete body.n;
-    delete body.seed;
-    delete body.max_tokens;
-    delete body.user; // Cursor sends this but Codex doesn't support it
-    delete body.prompt_cache_retention; // Cursor sends this but Codex doesn't support it
-    delete body.metadata; // Cursor sends this but Codex doesn't support it
-    delete body.stream_options; // Cursor sends this but Codex doesn't support it
-    delete body.safety_identifier; // Droid CLI sends this but Codex doesn't support it
+    if (nativeCodexPassthrough) {
+      return body;
+    }
 
     return body;
   }

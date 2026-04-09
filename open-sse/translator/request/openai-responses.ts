@@ -518,6 +518,12 @@ export function openaiToOpenAIResponsesRequest(
   if (root.temperature !== undefined) result.temperature = root.temperature;
   if (root.max_tokens !== undefined) result.max_tokens = root.max_tokens;
   if (root.top_p !== undefined) result.top_p = root.top_p;
+  if (root.prompt_cache_key !== undefined) result.prompt_cache_key = root.prompt_cache_key;
+  if (root.reasoning !== undefined) {
+    result.reasoning = root.reasoning;
+  } else if (root.reasoning_effort !== undefined) {
+    result.reasoning = { effort: root.reasoning_effort };
+  }
 
   return result;
 }

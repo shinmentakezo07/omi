@@ -1353,18 +1353,26 @@ export async function handleChatCore({
           ? translatedBody
           : { ...translatedBody, model: modelToCall };
 
-      // Inject prompt_cache_key only for providers that support it
-      if (
-        targetFormat === FORMATS.OPENAI &&
-        providerSupportsCaching(provider) &&
-        !bodyToSend.prompt_cache_key &&
-        Array.isArray(bodyToSend.messages) &&
-        !["nvidia", "codex", "xai"].includes(provider)
-      ) {
-        const { generatePromptCacheKey } = await import("@/lib/promptCache");
-        const cacheKey = generatePromptCacheKey(bodyToSend.messages);
-        if (cacheKey) {
-          bodyToSend = { ...bodyToSend, prompt_cache_key: cacheKey };
+      // Inject prompt_cache_key for supported providers before execution.
+      // For Codex Responses paths, generate from the original chat messages because
+      // the translated payload uses `input` instead of `messages`.
+      if (!bodyToSend.prompt_cache_key && !["nvidia", "xai"].includes(provider)) {
+        const cacheSourceMessages = Array.isArray(bodyToSend.messages)
+          ? bodyToSend.messages
+          : Array.isArray(body.messages)
+            ? body.messages
+            : null;
+
+        if (
+          cacheSourceMessages &&
+          (providerSupportsCaching(provider) || provider === "codex") &&
+          (targetFormat === FORMATS.OPENAI || targetFormat === FORMATS.OPENAI_RESPONSES)
+        ) {
+          const { generatePromptCacheKey } = await import("@/lib/promptCache");
+          const cacheKey = generatePromptCacheKey(cacheSourceMessages);
+          if (cacheKey) {
+            bodyToSend = { ...bodyToSend, prompt_cache_key: cacheKey };
+          }
         }
       }
 
