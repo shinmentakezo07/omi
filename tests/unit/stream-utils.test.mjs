@@ -196,6 +196,44 @@ test("createSSEStream translate mode converts Claude SSE into OpenAI chunks and 
   assert.equal(onCompletePayload.responseBody.usage.total_tokens, 4);
 });
 
+test("createSSEStream translate mode preserves reasoning separately from content in onComplete", async () => {
+  let onCompletePayload = null;
+  await readTransformed(
+    [
+      `data: ${JSON.stringify({
+        id: "chatcmpl_reasoning_translate",
+        object: "chat.completion.chunk",
+        model: "gpt-4.1-mini",
+        choices: [{ index: 0, delta: { reasoning_content: "think " } }],
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        id: "chatcmpl_reasoning_translate",
+        object: "chat.completion.chunk",
+        model: "gpt-4.1-mini",
+        choices: [{ index: 0, delta: { content: "answer" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+      })}\n\n`,
+    ],
+    {
+      mode: "translate",
+      targetFormat: FORMATS.OPENAI,
+      sourceFormat: FORMATS.OPENAI,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      body: {
+        messages: [{ role: "user", content: "hello" }],
+      },
+      onComplete(payload) {
+        onCompletePayload = payload;
+      },
+    }
+  );
+
+  assert.equal(onCompletePayload.responseBody.choices[0].message.content, "answer");
+  assert.equal(onCompletePayload.responseBody.choices[0].message.reasoning_content, "think");
+  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 3);
+});
+
 test("createSSEStream passthrough preserves Responses API events and completion summaries", async () => {
   let onCompletePayload = null;
   const text = await readTransformed(
@@ -417,7 +455,12 @@ test("createSSEStream emits bounded debug logs for repeated passthrough parse er
 
   try {
     await readTransformed(
-      ['data: {"broken":\n\n', 'data: {"broken":\n\n', 'data: {"broken":\n\n', 'data: {"broken":\n\n'],
+      [
+        'data: {"broken":\n\n',
+        'data: {"broken":\n\n',
+        'data: {"broken":\n\n',
+        'data: {"broken":\n\n',
+      ],
       {
         mode: "passthrough",
         sourceFormat: FORMATS.OPENAI,
@@ -486,9 +529,7 @@ test("createSSEStream logs passthrough onComplete callback failures when debug l
   }
 
   assert.ok(
-    warnings.some((warning) =>
-      warning.includes("[STREAM_DEBUG] passthrough onComplete callback")
-    )
+    warnings.some((warning) => warning.includes("[STREAM_DEBUG] passthrough onComplete callback"))
   );
 });
 

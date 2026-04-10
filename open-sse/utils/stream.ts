@@ -17,6 +17,7 @@ import {
   formatSSE,
   unwrapGeminiChunk,
 } from "./streamHelpers.ts";
+import { buildOnCompleteResponseBody, mergeUsageSnapshot } from "./streamFinalizer.ts";
 import {
   createStructuredSSECollector,
   buildStreamSummaryFromEvents,
@@ -65,8 +66,10 @@ type TranslateState = ReturnType<typeof initState> & {
   toolNameMap?: unknown;
   usage?: unknown;
   finishReason?: unknown;
-  /** Accumulated message content for call log response body */
+  /** Accumulated visible message content for call log response body */
   accumulatedContent?: string;
+  /** Accumulated reasoning/thinking content for call log response body */
+  accumulatedReasoning?: string;
 };
 
 type ToolCall = {
@@ -160,6 +163,7 @@ export function createSSEStream(options: StreamOptions = {}) {
           provider,
           toolNameMap,
           accumulatedContent: "",
+          accumulatedReasoning: "",
         }
       : null;
 
@@ -201,11 +205,7 @@ export function createSSEStream(options: StreamOptions = {}) {
     onCompletePassthrough: 0,
     onCompleteTranslate: 0,
   };
-  const logStreamDebug = (
-    key: keyof StreamDebugCounters,
-    error: unknown,
-    context: string
-  ) => {
+  const logStreamDebug = (key: keyof StreamDebugCounters, error: unknown, context: string) => {
     if (!streamDebugEnabled) return;
     if (streamDebugCounters[key] >= streamDebugLimit) return;
 
@@ -269,7 +269,7 @@ export function createSSEStream(options: StreamOptions = {}) {
             let clientPayload: unknown = null;
 
             if (trimmed.startsWith("data:")) {
-              const providerPayload = parseSSELine(trimmed);
+              const providerPayload = parseSSELine(trimmed, { suppressParseErrorLog: true });
               if (providerPayload) {
                 providerPayloadCollector.push(providerPayload);
                 if ((providerPayload as { done?: unknown }).done === true) {
@@ -505,7 +505,7 @@ export function createSSEStream(options: StreamOptions = {}) {
           // Translate mode
           if (!trimmed) continue;
 
-          const parsed = parseSSELine(trimmed);
+          const parsed = parseSSELine(trimmed, { suppressParseErrorLog: true });
           if (!parsed) continue;
           providerPayloadCollector.push(parsed);
 
@@ -533,8 +533,9 @@ export function createSSEStream(options: StreamOptions = {}) {
           if (parsed.delta?.thinking) {
             const t = parsed.delta.thinking;
             totalContentLength += t.length;
-            if (state?.accumulatedContent !== undefined && typeof t === "string")
-              state.accumulatedContent += t;
+            if (state?.accumulatedReasoning !== undefined && typeof t === "string") {
+              state.accumulatedReasoning += t;
+            }
           }
 
           // OpenAI format
@@ -557,7 +558,7 @@ export function createSSEStream(options: StreamOptions = {}) {
             const r = parsed.choices[0].delta.reasoning_content;
             if (typeof r === "string") {
               totalContentLength += r.length;
-              if (state?.accumulatedContent !== undefined) state.accumulatedContent += r;
+              if (state?.accumulatedReasoning !== undefined) state.accumulatedReasoning += r;
             }
           }
           // Normalize `reasoning` alias → `reasoning_content` (NVIDIA kimi-k2.5 etc.)
@@ -570,7 +571,7 @@ export function createSSEStream(options: StreamOptions = {}) {
               parsed.choices[0].delta.reasoning_content = r;
               delete parsed.choices[0].delta.reasoning;
               totalContentLength += r.length;
-              if (state?.accumulatedContent !== undefined) state.accumulatedContent += r;
+              if (state?.accumulatedReasoning !== undefined) state.accumulatedReasoning += r;
             }
           }
 
@@ -612,7 +613,12 @@ export function createSSEStream(options: StreamOptions = {}) {
 
           // Extract usage
           const extracted = extractUsage(parsed);
-          if (extracted) state.usage = extracted; // Keep original usage for logging
+          if (extracted) {
+            state.usage = mergeUsageSnapshot(
+              (state.usage as Record<string, unknown> | null | undefined) || null,
+              extracted as Record<string, unknown>
+            );
+          }
 
           // Translate: targetFormat -> openai -> sourceFormat
           const translated = translateResponse(targetFormat, sourceFormat, parsed, state);
@@ -703,7 +709,7 @@ export function createSSEStream(options: StreamOptions = {}) {
               if (buffer.startsWith("data:") && !buffer.startsWith("data: ")) {
                 output = "data: " + buffer.slice(5);
               }
-              const bufferedPayload = parseSSELine(buffer.trim());
+              const bufferedPayload = parseSSELine(buffer.trim(), { suppressParseErrorLog: true });
               if (bufferedPayload) {
                 providerPayloadCollector.push(bufferedPayload);
                 clientPayloadCollector.push(bufferedPayload);
@@ -748,20 +754,15 @@ export function createSSEStream(options: StreamOptions = {}) {
                     (a, b) => a.index - b.index
                   );
                 }
-                const responseBody = {
-                  choices: [
-                    {
-                      message,
-                      finish_reason: passthroughHasToolCalls ? "tool_calls" : "stop",
-                    },
-                  ],
+                const responseBody = buildOnCompleteResponseBody({
+                  message,
                   usage: {
                     prompt_tokens: prompt,
                     completion_tokens: completion,
-                    total_tokens: prompt + completion,
+                    total_tokens: Number(u?.total_tokens ?? prompt + completion),
                   },
-                  _streamed: true,
-                };
+                  finishReason: passthroughHasToolCalls ? "tool_calls" : "stop",
+                });
                 onComplete({
                   status: 200,
                   usage,
@@ -787,7 +788,7 @@ export function createSSEStream(options: StreamOptions = {}) {
 
           // Translate mode: process remaining buffer
           if (buffer.trim()) {
-            const parsed = parseSSELine(buffer.trim());
+            const parsed = parseSSELine(buffer.trim(), { suppressParseErrorLog: true });
             if (parsed && !parsed.done) {
               providerPayloadCollector.push(parsed);
               // Extract usage from remaining buffer — if the usage-bearing event
@@ -798,21 +799,10 @@ export function createSSEStream(options: StreamOptions = {}) {
               // in message_delta). Direct assignment would lose earlier data.
               const extracted = extractUsage(parsed);
               if (extracted) {
-                if (!state.usage) {
-                  state.usage = extracted;
-                } else {
-                  const su = state.usage as Record<string, number>;
-                  const eu = extracted as Record<string, number>;
-                  if (eu.prompt_tokens > 0) su.prompt_tokens = eu.prompt_tokens;
-                  if (eu.completion_tokens > 0) su.completion_tokens = eu.completion_tokens;
-                  if (eu.total_tokens > 0) su.total_tokens = eu.total_tokens;
-                  if (eu.cache_read_input_tokens > 0)
-                    su.cache_read_input_tokens = eu.cache_read_input_tokens;
-                  if (eu.cache_creation_input_tokens > 0)
-                    su.cache_creation_input_tokens = eu.cache_creation_input_tokens;
-                  if (eu.cached_tokens > 0) su.cached_tokens = eu.cached_tokens;
-                  if (eu.reasoning_tokens > 0) su.reasoning_tokens = eu.reasoning_tokens;
-                }
+                state.usage = mergeUsageSnapshot(
+                  (state.usage as Record<string, unknown> | null | undefined) || null,
+                  extracted as Record<string, unknown>
+                );
               }
 
               const translated = translateResponse(targetFormat, sourceFormat, parsed, state);
@@ -894,10 +884,14 @@ export function createSSEStream(options: StreamOptions = {}) {
               const prompt = Number(u?.prompt_tokens ?? u?.input_tokens ?? 0);
               const completion = Number(u?.completion_tokens ?? u?.output_tokens ?? 0);
               const content = (state?.accumulatedContent ?? "").trim() || "";
+              const reasoning = (state?.accumulatedReasoning ?? "").trim() || "";
               const message: Record<string, unknown> = {
                 role: "assistant",
                 content: content || null,
               };
+              if (reasoning) {
+                message.reasoning_content = reasoning;
+              }
               const hasToolCalls = state?.toolCalls?.size > 0;
               if (hasToolCalls) {
                 // Normalize shape — translators may store different structures
@@ -915,20 +909,16 @@ export function createSSEStream(options: StreamOptions = {}) {
                   )
                   .sort((a, b) => a.index - b.index);
               }
-              const responseBody = {
-                choices: [
-                  {
-                    message,
-                    finish_reason: hasToolCalls ? "tool_calls" : "stop",
-                  },
-                ],
+              const rawTotal = Number(u?.total_tokens ?? 0);
+              const responseBody = buildOnCompleteResponseBody({
+                message,
                 usage: {
                   prompt_tokens: prompt,
                   completion_tokens: completion,
-                  total_tokens: prompt + completion,
+                  total_tokens: rawTotal > 0 ? rawTotal : prompt + completion,
                 },
-                _streamed: true,
-              };
+                finishReason: hasToolCalls ? "tool_calls" : "stop",
+              });
               onComplete({
                 status: 200,
                 usage: state?.usage,

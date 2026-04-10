@@ -12,9 +12,18 @@
  */
 
 import { FORMATS } from "../translator/formats.ts";
+import { logger } from "./logger.ts";
+
+type ParseSSELineOptions = {
+  suppressParseErrorLog?: boolean;
+  context?: string;
+};
+
+const streamLogger = logger("STREAM");
 
 // Parse SSE data line
-export function parseSSELine(line) {
+export function parseSSELine(line: string, options: ParseSSELineOptions = {}) {
+  const { suppressParseErrorLog = false, context = "parseSSELine" } = options;
   if (!line) return null;
 
   // Trim leading whitespace before checking prefix character
@@ -26,11 +35,12 @@ export function parseSSELine(line) {
 
   try {
     return JSON.parse(data);
-  } catch (error) {
-    if (data.length > 0) {
-      console.log(
-        `[WARN] Failed to parse SSE line (${data.length} chars): ${data.substring(0, 200)}...`
-      );
+  } catch {
+    if (!suppressParseErrorLog && data.length > 0) {
+      streamLogger.warn("Failed to parse SSE line", {
+        context,
+        length: data.length,
+      });
     }
     return null;
   }
