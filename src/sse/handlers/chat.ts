@@ -11,6 +11,7 @@ import { handleComboChat } from "@omniroute/open-sse/services/combo.ts";
 import { resolveComboConfig } from "@omniroute/open-sse/services/comboConfig.ts";
 import { injectHandoffIntoBody } from "@omniroute/open-sse/services/contextHandoff.ts";
 import { HTTP_STATUS } from "@omniroute/open-sse/config/constants.ts";
+import { injectSystemPrompt } from "@omniroute/open-sse/services/systemPrompt.ts";
 import { getTargetFormat } from "@omniroute/open-sse/services/provider.ts";
 import {
   getModelTargetFormat,
@@ -526,6 +527,7 @@ async function handleSingleModelChat(
         );
       }
     }
+    requestBody = injectSystemPrompt(requestBody);
     if (runtimeOptions.sessionId && body?._omnirouteInternalRequest !== "context-handoff") {
       touchSession(runtimeOptions.sessionId, credentials.connectionId);
     }

@@ -22,6 +22,7 @@ const { handleChat } = await import("../../src/sse/handlers/chat.ts");
 const { initTranslators } = await import("../../open-sse/translator/index.ts");
 const { clearInflight } = await import("../../open-sse/services/requestDedup.ts");
 const { BaseExecutor } = await import("../../open-sse/executors/base.ts");
+const { setSystemPromptConfig } = await import("../../open-sse/services/systemPrompt.ts");
 const { resetAllAvailability, setModelUnavailable } =
   await import("../../src/domain/modelAvailability.ts");
 const { resetAllCircuitBreakers } = await import("../../src/shared/utils/circuitBreaker.ts");
@@ -246,6 +247,7 @@ function buildOpenAIStreamResponse(text = "streamed from openai") {
 async function resetStorage() {
   globalThis.fetch = originalFetch;
   process.env.REQUIRE_API_KEY = "false";
+  setSystemPromptConfig({ enabled: false, prompt: "" });
   clearInflight();
   resetAllAvailability();
   resetAllCircuitBreakers();
@@ -394,6 +396,105 @@ test.after(async () => {
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
+test("chat pipeline injects the global system prompt into live OpenAI requests", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-system-prompt" });
+  await settingsDb.updateSettings({
+    systemPrompt: {
+      enabled: true,
+      prompt: "GLOBAL INSTRUCTION",
+    },
+  });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (url, init = {}) => {
+    fetchCalls.push({
+      url: String(url),
+      headers: toPlainHeaders(init.headers),
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildOpenAIResponse("OpenAI with system prompt");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4o-mini",
+        stream: false,
+        messages: [{ role: "user", content: "Hello OpenAI" }],
+      },
+    })
+  );
+
+  const json = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].body.messages[0].role, "system");
+  assert.equal(fetchCalls[0].body.messages[0].content, "GLOBAL INSTRUCTION");
+  assert.equal(fetchCalls[0].body.messages[1].content, "Hello OpenAI");
+  assert.equal(json.choices[0].message.content, "OpenAI with system prompt");
+});
+
+test("chat pipeline prepends the global prompt to an existing system message", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-system-prepend" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    fetchCalls.push({
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildOpenAIResponse("OpenAI with prepended system prompt");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4o-mini",
+        stream: false,
+        messages: [
+          { role: "system", content: "Existing instruction" },
+          { role: "user", content: "Hello OpenAI" },
+        ],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    fetchCalls[0].body.messages[0].content,
+    "GLOBAL INSTRUCTION\n\nExisting instruction"
+  );
+});
+
+test("chat pipeline honors _skipSystemPrompt for live requests", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-system-skip" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    fetchCalls.push({
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildOpenAIResponse("OpenAI skipped system prompt");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4o-mini",
+        stream: false,
+        _skipSystemPrompt: true,
+        messages: [{ role: "user", content: "Hello OpenAI" }],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(fetchCalls[0].body.messages[0].role, "user");
+  assert.equal(fetchCalls[0].body.messages[0].content, "Hello OpenAI");
+});
+
 test("chat pipeline handles OpenAI passthrough with valid API key auth", async () => {
   await seedConnection("openai", { apiKey: "sk-openai-primary" });
   const apiKey = await seedApiKey();
@@ -415,7 +516,7 @@ test("chat pipeline handles OpenAI passthrough with valid API key auth", async (
       body: {
         model: "openai/gpt-4o-mini",
         stream: false,
-        messages: [{ role: "user", content: "Hello OpenAI" }],
+        messages: [{ role: "user", content: "Hello OpenAI auth" }],
       },
     })
   );
@@ -425,7 +526,7 @@ test("chat pipeline handles OpenAI passthrough with valid API key auth", async (
   assert.equal(fetchCalls.length, 1);
   assert.match(fetchCalls[0].url, /\/chat\/completions$/);
   assert.equal(fetchCalls[0].headers.Authorization, "Bearer sk-openai-primary");
-  assert.equal(fetchCalls[0].body.messages[0].content, "Hello OpenAI");
+  assert.equal(fetchCalls[0].body.messages[0].content, "Hello OpenAI auth");
   assert.equal(json.choices[0].message.content, "OpenAI passthrough");
 });
 

@@ -1,11 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const {
-  injectSystemPrompt,
-  setSystemPromptConfig,
-  getSystemPromptConfig,
-} = await import("../../open-sse/services/systemPrompt.ts");
+const { injectSystemPrompt, setSystemPromptConfig, getSystemPromptConfig } =
+  await import("../../open-sse/services/systemPrompt.ts");
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +87,21 @@ test("injectSystemPrompt: with explicit promptText override", () => {
 test("injectSystemPrompt: null body returns as-is", () => {
   setSystemPromptConfig({ enabled: true, prompt: "test" });
   assert.equal(injectSystemPrompt(null), null);
+});
+
+test("injectSystemPrompt: does not mutate the original body", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    messages: [{ role: "user", content: "hi" }],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.notEqual(result, body);
+  assert.deepEqual(body, {
+    messages: [{ role: "user", content: "hi" }],
+  });
+  assert.equal(result.messages[0].role, "system");
 });
 
 // Reset

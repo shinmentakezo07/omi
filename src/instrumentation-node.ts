@@ -26,6 +26,52 @@ function isBackgroundServicesDisabled(): boolean {
   return new Set(["1", "true", "yes", "on"]).has(raw.trim().toLowerCase());
 }
 
+export async function restoreRuntimeSettings(getSettings: () => Promise<Record<string, unknown>>) {
+  const [{ setSystemPromptConfig }, { setCustomAliases }, { setDefaultFastServiceTierEnabled }] =
+    await Promise.all([
+      import("@omniroute/open-sse/services/systemPrompt.ts"),
+      import("@omniroute/open-sse/services/modelDeprecation.ts"),
+      import("@omniroute/open-sse/executors/codex.ts"),
+    ]);
+  const settings = await getSettings();
+
+  const systemPrompt =
+    typeof settings.systemPrompt === "string"
+      ? JSON.parse(settings.systemPrompt)
+      : settings.systemPrompt;
+  if (systemPrompt && typeof systemPrompt === "object") {
+    setSystemPromptConfig(systemPrompt);
+    if (typeof (systemPrompt as { enabled?: unknown }).enabled === "boolean") {
+      console.log(
+        `[STARTUP] Restored global system prompt: ${systemPrompt.enabled ? "on" : "off"}`
+      );
+    }
+  }
+
+  if (settings.modelAliases) {
+    const aliases =
+      typeof settings.modelAliases === "string"
+        ? JSON.parse(settings.modelAliases)
+        : settings.modelAliases;
+    if (aliases && typeof aliases === "object") {
+      setCustomAliases(aliases);
+      console.log(
+        `[STARTUP] Restored ${Object.keys(aliases).length} custom model alias(es) from settings`
+      );
+    }
+  }
+
+  const persisted =
+    typeof settings.codexServiceTier === "string"
+      ? JSON.parse(settings.codexServiceTier)
+      : settings.codexServiceTier;
+
+  if (typeof (persisted as { enabled?: unknown })?.enabled === "boolean") {
+    setDefaultFastServiceTierEnabled((persisted as { enabled: boolean }).enabled);
+    console.log(`[STARTUP] Restored Codex fast service tier: ${persisted.enabled ? "on" : "off"}`);
+  }
+}
+
 async function ensureSecrets(): Promise<void> {
   let getPersistedSecret = (_key: string): string | null => null;
   let persistSecret = (_key: string, _value: string): void => {};
@@ -105,36 +151,7 @@ export async function registerNodejs(): Promise<void> {
   }
 
   try {
-    const [{ setCustomAliases }, { setDefaultFastServiceTierEnabled }] = await Promise.all([
-      import("@omniroute/open-sse/services/modelDeprecation.ts"),
-      import("@omniroute/open-sse/executors/codex.ts"),
-    ]);
-    const settings = await getSettings();
-
-    if (settings.modelAliases) {
-      const aliases =
-        typeof settings.modelAliases === "string"
-          ? JSON.parse(settings.modelAliases)
-          : settings.modelAliases;
-      if (aliases && typeof aliases === "object") {
-        setCustomAliases(aliases);
-        console.log(
-          `[STARTUP] Restored ${Object.keys(aliases).length} custom model alias(es) from settings`
-        );
-      }
-    }
-
-    const persisted =
-      typeof settings.codexServiceTier === "string"
-        ? JSON.parse(settings.codexServiceTier)
-        : settings.codexServiceTier;
-
-    if (typeof persisted?.enabled === "boolean") {
-      setDefaultFastServiceTierEnabled(persisted.enabled);
-      console.log(
-        `[STARTUP] Restored Codex fast service tier: ${persisted.enabled ? "on" : "off"}`
-      );
-    }
+    await restoreRuntimeSettings(getSettings);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn("[STARTUP] Could not restore runtime settings:", msg);
