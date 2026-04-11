@@ -447,7 +447,11 @@ export class CodexExecutor extends BaseExecutor {
     delete body.max_tokens;
     delete body.user; // Cursor sends this but Codex doesn't support it
     delete body.prompt_cache_retention; // Cursor sends this but Codex doesn't support it
-    delete body.metadata; // Cursor sends this but Codex doesn't support it
+    // Preserve metadata for native Codex passthrough (non-compact only), strip otherwise
+    // Compact endpoint rejects metadata, but regular responses passthrough can preserve it.
+    if (!nativeCodexPassthrough || isCompactRequest) {
+      delete body.metadata; // Cursor sends this but Codex doesn't support it
+    }
     delete body.stream_options; // Cursor sends this but Codex doesn't support it
     delete body.safety_identifier; // Droid CLI sends this but Codex doesn't support it
 
@@ -467,19 +471,22 @@ export class CodexExecutor extends BaseExecutor {
       }
     }
 
-    // Apply reasoning normalization on both native passthrough and translated paths
-    // so proxy behavior matches direct Codex usage.
+    // Apply reasoning normalization for translated paths and compact requests.
+    // For regular native passthrough, preserve the original reasoning_effort field.
     // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
-    if (!body.reasoning) {
-      const rawEffort = body.reasoning_effort || modelEffort || "medium";
-      // Clamp effort to the model's maximum allowed level (feature-07)
-      const effort = clampEffort(cleanModel, rawEffort);
-      body.reasoning = { effort };
-    } else if (body.reasoning.effort) {
-      // Also clamp if reasoning object was provided directly
-      body.reasoning.effort = clampEffort(cleanModel, body.reasoning.effort);
+    // Compact requests need reasoning normalization because they go to /responses/compact which expects it.
+    if (!nativeCodexPassthrough || isCompactRequest) {
+      if (!body.reasoning) {
+        const rawEffort = body.reasoning_effort || modelEffort || "medium";
+        // Clamp effort to the model's maximum allowed level (feature-07)
+        const effort = clampEffort(cleanModel, rawEffort);
+        body.reasoning = { effort };
+      } else if (body.reasoning.effort) {
+        // Also clamp if reasoning object was provided directly
+        body.reasoning.effort = clampEffort(cleanModel, body.reasoning.effort);
+      }
+      delete body.reasoning_effort;
     }
-    delete body.reasoning_effort;
 
     if (nativeCodexPassthrough) {
       return body;

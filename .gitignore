@@ -154,6 +154,9 @@ vscode-extension/
 # Local OpenCode agent config
 .config/
 
+# Local git worktrees
+.worktrees/
+
 # Empty/dangling files
 typescript
 
