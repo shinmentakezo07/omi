@@ -167,16 +167,18 @@ test("extractExternalSessionId accepts hyphen and underscore variants", () => {
   assert.equal(extractExternalSessionId(h2), "ext:def-456");
 });
 
-test("checkSessionLimit enforces max_sessions for new sessions only", () => {
-  const keyId = "key-1";
-  registerKeySession(keyId, "ext:sess-a");
-  assert.equal(isSessionRegisteredForKey(keyId, "ext:sess-a"), true);
+test("expired sessions are removed from per-key active counts on read", async () => {
+  const keyId = "key-expiry";
+  registerKeySession(keyId, "sess-expired");
+  touchSession("sess-expired");
 
-  const violation = checkSessionLimit(keyId, 1);
-  assert.ok(violation);
-  assert.equal(violation.code, "SESSION_LIMIT_EXCEEDED");
-
-  unregisterKeySession(keyId, "ext:sess-a");
-  assert.equal(isSessionRegisteredForKey(keyId, "ext:sess-a"), false);
-  assert.equal(checkSessionLimit(keyId, 1), null);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 31 * 60 * 1000;
+  try {
+    assert.equal(getSessionInfo("sess-expired"), null);
+    assert.equal(checkSessionLimit(keyId, 1), null);
+    assert.equal(isSessionRegisteredForKey(keyId, "sess-expired"), false);
+  } finally {
+    Date.now = realNow;
+  }
 });

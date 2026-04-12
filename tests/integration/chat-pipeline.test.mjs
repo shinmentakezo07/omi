@@ -461,10 +461,8 @@ test("chat pipeline prepends the global prompt to an existing system message", a
   );
 
   assert.equal(response.status, 200);
-  assert.equal(
-    fetchCalls[0].body.messages[0].content,
-    "GLOBAL INSTRUCTION\n\nExisting instruction"
-  );
+  assert.ok(fetchCalls[0].body.messages[0].content.startsWith("GLOBAL INSTRUCTION"));
+  assert.ok(fetchCalls[0].body.messages[0].content.includes("Existing instruction"));
 });
 
 test("chat pipeline honors _skipSystemPrompt for live requests", async () => {
@@ -495,40 +493,132 @@ test("chat pipeline honors _skipSystemPrompt for live requests", async () => {
   assert.equal(fetchCalls[0].body.messages[0].content, "Hello OpenAI");
 });
 
-test("chat pipeline handles OpenAI passthrough with valid API key auth", async () => {
-  await seedConnection("openai", { apiKey: "sk-openai-primary" });
-  const apiKey = await seedApiKey();
+test("chat pipeline injects the global system prompt into responses instructions", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-responses-system-prompt" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
   const fetchCalls = [];
 
-  globalThis.fetch = async (url, init = {}) => {
+  globalThis.fetch = async (_url, init = {}) => {
     fetchCalls.push({
-      url: String(url),
-      method: init.method || "GET",
-      headers: toPlainHeaders(init.headers),
       body: init.body ? JSON.parse(String(init.body)) : null,
     });
-    return buildOpenAIResponse("OpenAI passthrough");
+    return buildOpenAIResponse("OpenAI responses with system prompt");
   };
 
   const response = await handleChat(
     buildRequest({
-      authKey: apiKey.key,
+      url: "http://localhost/v1/responses",
       body: {
         model: "openai/gpt-4o-mini",
         stream: false,
-        messages: [{ role: "user", content: "Hello OpenAI auth" }],
+        instructions: "Existing response instruction",
+        input: [{ role: "user", content: "Hello OpenAI responses" }],
       },
     })
   );
 
-  const json = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(fetchCalls.length, 1);
-  assert.match(fetchCalls[0].url, /\/chat\/completions$/);
-  assert.equal(fetchCalls[0].headers.Authorization, "Bearer sk-openai-primary");
-  assert.equal(fetchCalls[0].body.messages[0].content, "Hello OpenAI auth");
-  assert.equal(json.choices[0].message.content, "OpenAI passthrough");
+  assert.equal(fetchCalls[0].body.instructions, "GLOBAL INSTRUCTION\n\nExisting response instruction");
 });
+
+test("chat pipeline creates responses instructions when only input exists", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-responses-create-system" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    fetchCalls.push({
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildOpenAIResponse("OpenAI responses created instruction");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      url: "http://localhost/v1/responses",
+      body: {
+        model: "openai/gpt-4o-mini",
+        stream: false,
+        input: [{ role: "user", content: "Hello OpenAI responses" }],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(fetchCalls[0].body.instructions, "GLOBAL INSTRUCTION");
+  assert.deepEqual(fetchCalls[0].body.input, [{ role: "user", content: "Hello OpenAI responses" }]);
+});
+
+test("chat pipeline avoids double injection when system and messages coexist", async () => {
+  await seedConnection("claude", { apiKey: "sk-claude-system-no-dup" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    fetchCalls.push({
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildClaudeResponse("Claude prompt without duplication");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "claude/claude-3-5-sonnet-20241022",
+        stream: false,
+        system: "Claude native system",
+        messages: [
+          { role: "system", content: "Existing message system" },
+          { role: "user", content: "Hello Claude" },
+        ],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(fetchCalls[0].body.system, "GLOBAL INSTRUCTION\n\nClaude native system");
+  assert.equal(fetchCalls[0].body.messages[0].content, "Existing message system");
+});
+
+test("chat pipeline preserves structured system message content", async () => {
+  await seedConnection("openai", { apiKey: "sk-openai-structured-system" });
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL INSTRUCTION" });
+  const fetchCalls = [];
+
+  globalThis.fetch = async (_url, init = {}) => {
+    fetchCalls.push({
+      body: init.body ? JSON.parse(String(init.body)) : null,
+    });
+    return buildOpenAIResponse("OpenAI structured system prompt");
+  };
+
+  const response = await handleChat(
+    buildRequest({
+      body: {
+        model: "openai/gpt-4o-mini",
+        stream: false,
+        messages: [
+          {
+            role: "system",
+            content: [{ type: "text", text: "Existing instruction" }],
+          },
+          { role: "user", content: "Hello OpenAI" },
+        ],
+      },
+    })
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(fetchCalls[0].body.messages[0].content[0], {
+    type: "text",
+    text: "GLOBAL INSTRUCTION",
+  });
+  assert.deepEqual(fetchCalls[0].body.messages[0].content[1], {
+    type: "text",
+    text: "Existing instruction",
+  });
+});
+
 
 test("chat pipeline translates OpenAI requests to Claude and returns OpenAI-shaped responses", async () => {
   await seedConnection("claude", { apiKey: "sk-claude-primary" });

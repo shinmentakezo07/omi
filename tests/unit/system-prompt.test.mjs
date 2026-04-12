@@ -74,7 +74,7 @@ test("injectSystemPrompt: _skipSystemPrompt bypasses", () => {
     messages: [{ role: "user", content: "hi" }],
   };
   const result = injectSystemPrompt(body);
-  assert.deepEqual(result, body);
+  assert.deepEqual(result, { messages: [{ role: "user", content: "hi" }] });
 });
 
 test("injectSystemPrompt: with explicit promptText override", () => {
@@ -102,6 +102,78 @@ test("injectSystemPrompt: does not mutate the original body", () => {
     messages: [{ role: "user", content: "hi" }],
   });
   assert.equal(result.messages[0].role, "system");
+});
+
+test("injectSystemPrompt: creates instructions for responses input payloads", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    input: [{ role: "user", content: "hi" }],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.equal(result.instructions, "GLOBAL:");
+  assert.deepEqual(result.input, body.input);
+});
+
+test("injectSystemPrompt: prepends to existing responses instructions", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    instructions: "Existing instruction",
+    input: [{ role: "user", content: "hi" }],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.equal(result.instructions, "GLOBAL:\n\nExisting instruction");
+});
+
+test("injectSystemPrompt: does not double inject when system and messages coexist", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    system: "Claude prompt",
+    messages: [
+      { role: "system", content: "Existing message prompt" },
+      { role: "user", content: "hi" },
+    ],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.equal(result.system, "GLOBAL:\n\nClaude prompt");
+  assert.equal(result.messages[0].content, "Existing message prompt");
+});
+
+test("injectSystemPrompt: prepends safely to structured system message content", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    messages: [
+      {
+        role: "system",
+        content: [{ type: "text", text: "Existing instruction" }],
+      },
+      { role: "user", content: "hi" },
+    ],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.ok(Array.isArray(result.messages[0].content));
+  assert.deepEqual(result.messages[0].content[0], { type: "text", text: "GLOBAL:" });
+  assert.deepEqual(result.messages[0].content[1], { type: "text", text: "Existing instruction" });
+});
+
+test("injectSystemPrompt: strips _skipSystemPrompt before returning", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    _skipSystemPrompt: true,
+    messages: [{ role: "user", content: "hi" }],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.equal("_skipSystemPrompt" in result, false);
+  assert.deepEqual(result.messages, body.messages);
 });
 
 // Reset

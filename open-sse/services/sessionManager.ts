@@ -27,6 +27,7 @@ interface SessionMessage {
 interface SessionBody {
   model?: string;
   system?: unknown;
+  instructions?: unknown;
   tools?: Array<{ name?: string; function?: { name?: string } }>;
   messages?: SessionMessage[];
   input?: SessionMessage[];
@@ -38,15 +39,20 @@ const sessions = new Map<string, SessionEntry>();
 
 // Auto-cleanup sessions older than 30 minutes
 const SESSION_TTL_MS = 30 * 60 * 1000;
+
+function removeSessionFromActiveKeys(sessionId: string): void {
+  for (const [apiKeyId, sessionSet] of activeSessionsByKey) {
+    sessionSet.delete(sessionId);
+    if (sessionSet.size === 0) activeSessionsByKey.delete(apiKeyId);
+  }
+}
+
 const _cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of sessions) {
     if (now - entry.lastActive > SESSION_TTL_MS) {
       sessions.delete(key);
-      for (const [apiKeyId, sessionSet] of activeSessionsByKey) {
-        sessionSet.delete(key);
-        if (sessionSet.size === 0) activeSessionsByKey.delete(apiKeyId);
-      }
+      removeSessionFromActiveKeys(key);
     }
   }
 }, 60_000);
@@ -140,6 +146,7 @@ export function getSessionInfo(sessionId: string | null): SessionEntry | null {
   if (!entry) return null;
   if (Date.now() - entry.lastActive > SESSION_TTL_MS) {
     sessions.delete(sessionId);
+    removeSessionFromActiveKeys(sessionId);
     return null;
   }
   return { ...entry };
@@ -300,6 +307,12 @@ function extractSystemPrompt(body: SessionBody | null | undefined): string | nul
   // Claude format: body.system
   if (body.system) {
     return typeof body.system === "string" ? body.system : JSON.stringify(body.system);
+  }
+  // OpenAI Responses format: body.instructions
+  if (body.instructions) {
+    return typeof body.instructions === "string"
+      ? body.instructions
+      : JSON.stringify(body.instructions);
   }
   // OpenAI format: messages[0].role === "system"
   if (Array.isArray(body.messages)) {

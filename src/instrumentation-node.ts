@@ -26,6 +26,17 @@ function isBackgroundServicesDisabled(): boolean {
   return new Set(["1", "true", "yes", "on"]).has(raw.trim().toLowerCase());
 }
 
+function safeParseSetting(setting: unknown, label: string): unknown {
+  if (typeof setting !== "string") return setting;
+  try {
+    return JSON.parse(setting);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[STARTUP] Failed to parse ${label} setting: ${message}`);
+    return null;
+  }
+}
+
 export async function restoreRuntimeSettings(getSettings: () => Promise<Record<string, unknown>>) {
   const [{ setSystemPromptConfig }, { setCustomAliases }, { setDefaultFastServiceTierEnabled }] =
     await Promise.all([
@@ -35,10 +46,7 @@ export async function restoreRuntimeSettings(getSettings: () => Promise<Record<s
     ]);
   const settings = await getSettings();
 
-  const systemPrompt =
-    typeof settings.systemPrompt === "string"
-      ? JSON.parse(settings.systemPrompt)
-      : settings.systemPrompt;
+  const systemPrompt = safeParseSetting(settings.systemPrompt, "systemPrompt");
   if (systemPrompt && typeof systemPrompt === "object") {
     setSystemPromptConfig(systemPrompt);
     if (typeof (systemPrompt as { enabled?: unknown }).enabled === "boolean") {
@@ -49,10 +57,7 @@ export async function restoreRuntimeSettings(getSettings: () => Promise<Record<s
   }
 
   if (settings.modelAliases) {
-    const aliases =
-      typeof settings.modelAliases === "string"
-        ? JSON.parse(settings.modelAliases)
-        : settings.modelAliases;
+    const aliases = safeParseSetting(settings.modelAliases, "modelAliases");
     if (aliases && typeof aliases === "object") {
       setCustomAliases(aliases);
       console.log(
@@ -61,10 +66,7 @@ export async function restoreRuntimeSettings(getSettings: () => Promise<Record<s
     }
   }
 
-  const persisted =
-    typeof settings.codexServiceTier === "string"
-      ? JSON.parse(settings.codexServiceTier)
-      : settings.codexServiceTier;
+  const persisted = safeParseSetting(settings.codexServiceTier, "codexServiceTier");
 
   if (typeof (persisted as { enabled?: unknown })?.enabled === "boolean") {
     setDefaultFastServiceTierEnabled((persisted as { enabled: boolean }).enabled);
