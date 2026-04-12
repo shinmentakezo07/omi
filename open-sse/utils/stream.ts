@@ -340,8 +340,7 @@ export function createSSEStream(options: StreamOptions = {}) {
                     passthroughAccumulatedContent += parsed.delta.thinking;
                   }
                   if (restoredToolName) {
-                    output = `data: ${JSON.stringify(parsed)}
-`;
+                    output = `data: ${JSON.stringify(parsed)}\n\n`;
                     injectedUsage = true;
                   }
                 } else {
@@ -383,13 +382,12 @@ export function createSSEStream(options: StreamOptions = {}) {
                     delete rDelta.content;
                     reasoningChunk.choices[0].finish_reason = null;
                     delete reasoningChunk.usage;
-                    const rOutput = `data: ${JSON.stringify(reasoningChunk)}\n`;
+                    const rOutput = `data: ${JSON.stringify(reasoningChunk)}\n\n`;
                     passthroughAccumulatedReasoning += delta.reasoning_content;
                     totalContentLength += delta.reasoning_content.length;
                     clientPayloadCollector.push(reasoningChunk);
                     reqLogger?.appendConvertedChunk?.(rOutput);
                     controller.enqueue(encoder.encode(rOutput));
-                    controller.enqueue(encoder.encode("\n"));
                     delete delta.reasoning_content;
                   }
 
@@ -458,23 +456,23 @@ export function createSSEStream(options: StreamOptions = {}) {
                     parsed.choices[0].finish_reason = "tool_calls";
                     // If we modify it, we must output the modified object
                     if (!injectedUsage && hasValidUsage(parsed.usage)) {
-                      output = `data: ${JSON.stringify(parsed)}\n`;
+                      output = `data: ${JSON.stringify(parsed)}\n\n`;
                       injectedUsage = true;
                     }
                   }
                   if (isFinishChunk && !hasValidUsage(parsed.usage)) {
                     const estimated = estimateUsage(body, totalContentLength, FORMATS.OPENAI);
                     parsed.usage = filterUsageForFormat(estimated, FORMATS.OPENAI);
-                    output = `data: ${JSON.stringify(parsed)}\n`;
+                    output = `data: ${JSON.stringify(parsed)}\n\n`;
                     usage = estimated;
                     injectedUsage = true;
                   } else if (isFinishChunk && usage) {
                     const buffered = addBufferToUsage(usage);
                     parsed.usage = filterUsageForFormat(buffered, FORMATS.OPENAI);
-                    output = `data: ${JSON.stringify(parsed)}\n`;
+                    output = `data: ${JSON.stringify(parsed)}\n\n`;
                     injectedUsage = true;
                   } else if (idFixed || needsReserialization) {
-                    output = `data: ${JSON.stringify(parsed)}\n`;
+                    output = `data: ${JSON.stringify(parsed)}\n\n`;
                     injectedUsage = true;
                   }
                 }
@@ -980,6 +978,7 @@ export function createSSETransformStreamWithLogger(
 }
 
 export function createPassthroughStreamWithLogger(
+  sourceFormat: string | null = null,
   provider: string | null = null,
   reqLogger: StreamLogger | null = null,
   toolNameMap: unknown = null,
@@ -991,6 +990,7 @@ export function createPassthroughStreamWithLogger(
 ) {
   return createSSEStream({
     mode: STREAM_MODE.PASSTHROUGH,
+    sourceFormat,
     provider,
     reqLogger,
     toolNameMap,

@@ -2434,6 +2434,7 @@ export async function handleChatCore({
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);
     transformStream = createPassthroughStreamWithLogger(
+      clientResponseFormat,
       provider,
       reqLogger,
       toolNameMap,

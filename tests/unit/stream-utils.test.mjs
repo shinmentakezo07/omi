@@ -782,25 +782,89 @@ test("createSSETransformStreamWithLogger flushes Responses API terminal events o
   assert.match(text, /\[DONE\]/);
 });
 
-test("createPassthroughStreamWithLogger reuses passthrough mode helpers", async () => {
-  const text = await readWithTransform(
+test("createSSEStream passthrough reserialized chunks preserve SSE blank-line framing", async () => {
+  const text = await readTransformed(
     [
       `data: ${JSON.stringify({
-        id: "chatcmpl_passthrough",
+        id: "chatcmpl_reasoning",
         object: "chat.completion.chunk",
         created: 1,
         model: "gpt-4.1-mini",
-        choices: [{ index: 0, delta: { role: "assistant", content: "Hello again" } }],
+        choices: [{ index: 0, delta: { role: "assistant", reasoning: "Think", content: "Hello" } }],
       })}\n\n`,
       "data: [DONE]\n\n",
     ],
-    createPassthroughStreamWithLogger("openai", null, null, "gpt-4.1-mini", null, {
-      messages: [{ role: "user", content: "hello" }],
-    })
+    {
+      mode: "passthrough",
+      sourceFormat: FORMATS.OPENAI,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      body: {
+        messages: [{ role: "user", content: "hello" }],
+      },
+    }
   );
 
-  assert.match(text, /Hello again/);
-  assert.match(text, /\[DONE\]/);
+  assert.match(text, /"reasoning_content":"Think"/);
+  assert.match(text, /"content":"Hello"/);
+  assert.match(text, /\n\ndata: /);
+  assert.doesNotMatch(
+    text,
+    /"reasoning_content":"Think"[^]*"content":"Hello"\n(?!(\n|data: \[DONE\]\n\n))/
+  );
+  assert.match(text, /data: \[DONE\]\n\n$/);
+});
+
+test("createPassthroughStreamWithLogger preserves sourceFormat for passthrough summaries", async () => {
+  let onCompletePayload = null;
+  const text = await readWithTransform(
+    [
+      `data: ${JSON.stringify({
+        type: "response.output_text.delta",
+        item_id: "item_123",
+        output_index: 0,
+        content_index: 0,
+        delta: "Hello",
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        type: "response.completed",
+        response: {
+          id: "resp_123",
+          object: "response",
+          model: "gpt-4.1-mini",
+          status: "completed",
+          output: [
+            {
+              id: "msg_123",
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "Hello" }],
+            },
+          ],
+          usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 },
+        },
+      })}\n\n`,
+      "data: [DONE]\n\n",
+    ],
+    createPassthroughStreamWithLogger(
+      FORMATS.OPENAI_RESPONSES,
+      "openai",
+      null,
+      null,
+      "gpt-4.1-mini",
+      null,
+      { messages: [{ role: "user", content: "hello" }] },
+      (payload) => {
+        onCompletePayload = payload;
+      }
+    )
+  );
+
+  assert.match(text, /response\.output_text\.delta/);
+  assert.equal(onCompletePayload.status, 200);
+  assert.equal(onCompletePayload.providerPayload.summary.object, "response");
+  assert.equal(onCompletePayload.providerPayload.summary.id, "resp_123");
+  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 5);
 });
 
 test("createStructuredSSECollector drops excess events and compactStructuredStreamPayload preserves metadata for object summaries", () => {
