@@ -138,20 +138,23 @@ test("parseSSEToResponsesOutput falls back to the latest response object when co
   assert.deepEqual(parsed.metadata, { source: "sse" });
 });
 
-test("parseSSEToResponsesOutput handles large payloads without truncation", () => {
-  const largeText = "A".repeat(10_000);
-  const rawSSE = `data: ${JSON.stringify({
-    type: "response.completed",
-    response: {
-      id: "resp_big",
-      object: "response",
-      model: "gpt-4.1",
-      status: "completed",
-      output: [{ type: "message", content: [{ type: "output_text", text: largeText }] }],
-    },
-  })}`;
+
+
+
+
+test("parseSSEToResponsesOutput synthesizes output from text deltas when no completed response exists", () => {
+  const rawSSE = [
+    'data: {"type":"response.in_progress","response":{"id":"resp_partial","model":"gpt-4.1","status":"in_progress","output":[]}}',
+    'data: {"type":"response.output_text.delta","delta":"hello "}',
+    'data: {"type":"response.output_text.delta","delta":"world"}',
+    'data: [DONE]'
+  ].join("\n");
 
   const parsed = parseSSEToResponsesOutput(rawSSE, "fallback-model");
 
-  assert.equal(parsed.output[0].content[0].text.length, 10_000);
+  assert.equal(parsed.output[0].type, "message");
+  assert.equal(parsed.output[0].content[0].text, "hello world");
+  assert.equal(parsed.output_text, "hello world");
 });
+
+

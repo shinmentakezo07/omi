@@ -2,6 +2,12 @@
 
 import { cn } from "@/shared/utils/cn";
 
+type CardSectionProps = React.HTMLAttributes<HTMLDivElement>;
+type CardRowProps = React.HTMLAttributes<HTMLDivElement>;
+type CardListItemProps = React.HTMLAttributes<HTMLDivElement> & {
+  actions?: React.ReactNode;
+};
+
 interface CardProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> {
   children?: React.ReactNode;
   title?: React.ReactNode;
@@ -13,7 +19,13 @@ interface CardProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "title"> 
   className?: string;
 }
 
-export default function Card({
+type CardComponent = ((props: CardProps) => React.ReactNode) & {
+  Section: (props: CardSectionProps) => React.ReactNode;
+  Row: (props: CardRowProps) => React.ReactNode;
+  ListItem: (props: CardListItemProps) => React.ReactNode;
+};
+
+const Card = ({
   children,
   title,
   subtitle,
@@ -23,7 +35,7 @@ export default function Card({
   hover = false,
   className,
   ...props
-}: CardProps) {
+}: CardProps) => {
   const paddings = {
     none: "",
     xs: "p-3",
@@ -45,15 +57,15 @@ export default function Card({
       {...props}
     >
       {(title || action) && (
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-4 flex items-center justify-between gap-3 max-sm:flex-col max-sm:items-start">
           <div className="flex items-center gap-3">
             {icon && (
-              <div className="p-2 rounded-lg bg-bg text-text-muted">
+              <div className="rounded-lg bg-bg p-2 text-text-muted">
                 <span className="material-symbols-outlined text-[20px]">{icon}</span>
               </div>
             )}
             <div>
-              {title && <h3 className="text-text-main font-semibold">{title}</h3>}
+              {title && <h3 className="font-semibold text-text-main">{title}</h3>}
               {subtitle && <p className="text-sm text-text-muted">{subtitle}</p>}
             </div>
           </div>
@@ -63,10 +75,11 @@ export default function Card({
       {children}
     </div>
   );
-}
+};
 
-// Sub-component: Bordered section inside Card
-Card.Section = function CardSection({ children, className, ...props }) {
+const CompoundCard = Card as CardComponent;
+
+CompoundCard.Section = function CardSection({ children, className, ...props }: CardSectionProps) {
   return (
     <div
       className={cn(
@@ -82,8 +95,7 @@ Card.Section = function CardSection({ children, className, ...props }) {
   );
 };
 
-// Sub-component: Hoverable row inside Card
-Card.Row = function CardRow({ children, className, ...props }) {
+CompoundCard.Row = function CardRow({ children, className, ...props }: CardRowProps) {
   return (
     <div
       className={cn(
@@ -99,8 +111,12 @@ Card.Row = function CardRow({ children, className, ...props }) {
   );
 };
 
-// Sub-component: List item with hover actions (macOS style)
-Card.ListItem = function CardListItem({ children, actions, className, ...props }) {
+CompoundCard.ListItem = function CardListItem({
+  children,
+  actions,
+  className,
+  ...props
+}: CardListItemProps) {
   return (
     <div
       className={cn(
@@ -121,3 +137,5 @@ Card.ListItem = function CardListItem({ children, actions, className, ...props }
     </div>
   );
 };
+
+export default CompoundCard;

@@ -4553,6 +4553,8 @@ function AddApiKeyModal({
   const [validationResult, setValidationResult] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [extraApiKeys, setExtraApiKeys] = useState<string[]>([]);
+  const [newExtraKey, setNewExtraKey] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleValidate = async () => {
@@ -4623,6 +4625,12 @@ function AddApiKeyModal({
       }
 
       const providerSpecificData: Record<string, unknown> = {};
+      const trimmedExtraApiKeys = extraApiKeys
+        .map((key) => key.trim())
+        .filter((key) => key.length > 0 && key !== formData.apiKey.trim());
+      if (trimmedExtraApiKeys.length > 0) {
+        providerSpecificData.extraApiKeys = trimmedExtraApiKeys;
+      }
       if (formData.customUserAgent.trim()) {
         providerSpecificData.customUserAgent = formData.customUserAgent.trim();
       }
@@ -4747,6 +4755,61 @@ function AddApiKeyModal({
               placeholder="my-app/1.0"
               hint="Optional override sent upstream as the User-Agent header for this connection"
             />
+          </div>
+        )}
+        {isCompatible && !isAnthropic && !isCcCompatible && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-text-main">
+              Extra API Keys
+              <span className="ml-2 text-[11px] font-normal text-text-muted">
+                (round-robin rotation — optional)
+              </span>
+            </label>
+            {extraApiKeys.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                {extraApiKeys.map((key, idx) => (
+                  <div key={`${key}-${idx}`} className="flex items-center gap-2">
+                    <span className="flex-1 font-mono text-xs bg-sidebar/50 px-3 py-2 rounded border border-border text-text-muted truncate">
+                      {`Key #${idx + 2}: ${key.slice(0, 6)}...${key.slice(-4)}`}
+                    </span>
+                    <button
+                      onClick={() => setExtraApiKeys(extraApiKeys.filter((_, i) => i !== idx))}
+                      className="p-1.5 rounded hover:bg-red-500/10 text-red-400 hover:text-red-500"
+                      title="Remove key"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                label="Add extra key"
+                type="password"
+                value={newExtraKey}
+                onChange={(e) => setNewExtraKey(e.target.value)}
+                placeholder="sk-..."
+                className="flex-1"
+              />
+              <div className="pt-6">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const trimmed = newExtraKey.trim();
+                    if (!trimmed || trimmed === formData.apiKey.trim()) return;
+                    setExtraApiKeys([...extraApiKeys, trimmed]);
+                    setNewExtraKey("");
+                  }}
+                  disabled={!newExtraKey.trim()}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-text-muted">
+              Extra keys are stored on this connection and rotated together with the primary key.
+            </p>
           </div>
         )}
         <Input

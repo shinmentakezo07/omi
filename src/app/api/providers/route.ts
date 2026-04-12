@@ -84,14 +84,6 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "OpenAI Compatible node not found" }, { status: 404 });
       }
 
-      const existingConnections = await getProviderConnections({ provider });
-      if (!allowMultipleCompatibleConnections && existingConnections.length > 0) {
-        return NextResponse.json(
-          { error: "Only one connection is allowed for this OpenAI Compatible node" },
-          { status: 400 }
-        );
-      }
-
       providerSpecificData = {
         ...(providerSpecificData || {}),
         prefix: node.prefix,

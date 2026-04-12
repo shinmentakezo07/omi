@@ -41,6 +41,15 @@ function toNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function copyOptionalArray(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+function copyOptionalRecord(value: unknown): JsonRecord | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return asRecord(value);
+}
+
 export function mergeUsageSnapshot(
   current: JsonRecord | null,
   incoming: JsonRecord | null
@@ -204,16 +213,61 @@ export function buildResponsesSummaryFromPayloads(
 
   const picked = completed || latestResponse;
   if (picked && Object.keys(picked).length > 0) {
-    return {
+    const output = Array.isArray(picked.output) ? picked.output : [];
+    const synthesizedOutput =
+      output.length === 0 && textParts.length > 0
+        ? [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: textParts.join("") }],
+            },
+          ]
+        : output;
+
+    const response: JsonRecord = {
       id: toString(picked.id, `resp_${Date.now()}`),
       object: "response",
       model: toString(picked.model, fallbackModel || "unknown"),
-      output: Array.isArray(picked.output) ? picked.output : [],
+      output: synthesizedOutput,
       usage: picked.usage ?? usage ?? null,
       status: toString(picked.status, completed ? "completed" : "in_progress"),
       created_at: toNumber(picked.created_at, Math.floor(Date.now() / 1000)),
       metadata: asRecord(picked.metadata),
     };
+
+    const optionalArrayKeys = ["tools"] as const;
+    for (const key of optionalArrayKeys) {
+      const value = copyOptionalArray(picked[key]);
+      if (value) response[key] = value;
+    }
+
+    const optionalRecordKeys = ["error", "incomplete_details", "reasoning", "tool_choice"] as const;
+    for (const key of optionalRecordKeys) {
+      const value = copyOptionalRecord(picked[key]);
+      if (value) response[key] = value;
+    }
+
+    const optionalScalarKeys = [
+      "background",
+      "instructions",
+      "max_output_tokens",
+      "output_text",
+      "parallel_tool_calls",
+      "previous_response_id",
+      "store",
+      "truncation",
+      "user",
+    ] as const;
+    for (const key of optionalScalarKeys) {
+      if (picked[key] !== undefined) response[key] = picked[key];
+    }
+
+    if (response.output_text === undefined && textParts.length > 0) {
+      response.output_text = textParts.join("");
+    }
+
+    return response;
   }
 
   return {
@@ -230,6 +284,7 @@ export function buildResponsesSummaryFromPayloads(
             },
           ]
         : [],
+    output_text: textParts.join(""),
     usage: usage ?? null,
     status: "completed",
     created_at: Math.floor(Date.now() / 1000),

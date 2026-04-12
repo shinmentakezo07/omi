@@ -5,6 +5,12 @@
 omnirouteCloud/
 omnirouteSite/
 
+# local-only files requested to ignore
+AGENTS.md
+package-lock.json
+pnpm-lock.yaml
+.claude/
+
 # Root-level underscore-prefixed directories (private/draft — never commit)
 /_*/
 
@@ -168,3 +174,6 @@ docs/superpowers/
 
 # GitNexus local index
 .gitnexus
+AGENTS.md
+package.json
+package-lock.json

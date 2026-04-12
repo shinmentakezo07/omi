@@ -1,12 +1,50 @@
-/**
- * Translator: OpenAI Chat Completions → OpenAI Responses API (response)
- * Converts streaming chunks from Chat Completions to Responses API events
- */
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
 
 function normalizeToolName(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildOutputTextPart(text) {
+  return { type: "output_text", annotations: [], logprobs: [], text };
+}
+
+function sortedNumericKeys(record) {
+  return Object.keys(record).sort((a, b) => Number(a) - Number(b));
+}
+
+function buildCompletedOutput(state) {
+  const output = [];
+
+  if (state.reasoningId) {
+    output.push({
+      id: state.reasoningId,
+      type: "reasoning",
+      summary: [{ type: "summary_text", text: state.reasoningBuf }],
+    });
+  }
+
+  for (const idx of sortedNumericKeys(state.msgItemAdded)) {
+    output.push({
+      id: `msg_${state.responseId}_${idx}`,
+      type: "message",
+      role: "assistant",
+      content: [buildOutputTextPart(state.msgTextBuf[idx] || "")],
+    });
+  }
+
+  for (const idx of sortedNumericKeys(state.funcCallIds)) {
+    const callId = state.funcCallIds[idx];
+    output.push({
+      id: `fc_${callId}`,
+      type: "function_call",
+      call_id: callId,
+      name: state.funcNames[idx] || "",
+      arguments: state.funcArgsBuf[idx] || "{}",
+    });
+  }
+
+  return output;
 }
 
 /**
@@ -18,9 +56,6 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
     return flushEvents(state);
   }
 
-  // Capture usage from all chunks that carry it (usage-only chunks OR final chunks with finish_reason)
-  // Normalize Chat Completions format (prompt_tokens/completion_tokens) to Responses API format
-  // (input_tokens/output_tokens) so response.completed always has the fields Codex expects.
   if (chunk.usage) {
     const u = chunk.usage;
     const input_tokens = u.input_tokens ?? u.prompt_tokens ?? 0;
@@ -50,8 +85,8 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
   const choice = chunk.choices[0];
   const idx = choice.index || 0;
   const delta = choice.delta || {};
+  state.model = chunk.model || state.model;
 
-  // Emit initial events
   if (!state.started) {
     state.started = true;
     state.responseId = chunk.id ? `resp_${chunk.id}` : state.responseId;
@@ -66,6 +101,7 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
         background: false,
         error: null,
         output: [],
+        ...(state.model ? { model: state.model } : {}),
       },
     });
 
@@ -76,17 +112,16 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
         object: "response",
         created_at: state.created,
         status: "in_progress",
+        ...(state.model ? { model: state.model } : {}),
       },
     });
   }
 
-  // Handle reasoning_content
   if (delta.reasoning_content) {
     startReasoning(state, emit, idx);
     emitReasoningDelta(state, emit, delta.reasoning_content);
   }
 
-  // Handle text content
   if (delta.content) {
     let content = delta.content;
 
@@ -116,7 +151,6 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
     }
   }
 
-  // Handle tool_calls
   if (delta.tool_calls) {
     closeMessage(state, emit, idx);
     for (const tc of delta.tool_calls) {
@@ -124,8 +158,15 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
     }
   }
 
-  // Handle finish_reason
   if (choice.finish_reason) {
+    if (choice.finish_reason === "length") {
+      state.status = "incomplete";
+      state.incomplete_details = { reason: "max_output_tokens" };
+    } else {
+      state.status = "completed";
+      state.incomplete_details = null;
+    }
+
     for (const i in state.msgItemAdded) closeMessage(state, emit, i);
     closeReasoning(state, emit);
     for (const i in state.funcCallIds) closeToolCall(state, emit, i);
@@ -135,7 +176,6 @@ export function openaiToOpenAIResponsesResponse(chunk, state) {
   return events;
 }
 
-// Helper functions
 function startReasoning(state, emit, idx) {
   if (!state.reasoningId) {
     state.reasoningId = `rs_${state.responseId}_${idx}`;
@@ -222,7 +262,7 @@ function emitTextContent(state, emit, idx, content) {
       item_id: `msg_${state.responseId}_${idx}`,
       output_index: idx,
       content_index: 0,
-      part: { type: "output_text", annotations: [], logprobs: [], text: "" },
+      part: buildOutputTextPart(""),
     });
   }
 
@@ -259,7 +299,7 @@ function closeMessage(state, emit, idx) {
       item_id: msgId,
       output_index: parseInt(idx),
       content_index: 0,
-      part: { type: "output_text", annotations: [], logprobs: [], text: fullText },
+      part: buildOutputTextPart(fullText),
     });
 
     emit("response.output_item.done", {
@@ -268,7 +308,7 @@ function closeMessage(state, emit, idx) {
       item: {
         id: msgId,
         type: "message",
-        content: [{ type: "output_text", annotations: [], logprobs: [], text: fullText }],
+        content: [buildOutputTextPart(fullText)],
         role: "assistant",
       },
     });
@@ -280,8 +320,6 @@ function emitToolCall(state, emit, tc) {
   const newCallId = tc.id;
   const funcName = tc.function?.name;
 
-  // T37: If we already have a tool call at this index but the ID changed,
-  // we must close the current one and start a new one to prevent merging.
   if (state.funcCallIds[tcIdx] && newCallId && state.funcCallIds[tcIdx] !== newCallId) {
     closeToolCall(state, emit, tcIdx);
     delete state.funcCallIds[tcIdx];
@@ -358,46 +396,28 @@ function sendCompleted(state, emit) {
   if (!state.completedSent) {
     state.completedSent = true;
 
-    // Build output from accumulated state
-    const output = [];
-    if (state.reasoningId) {
-      output.push({
-        id: state.reasoningId,
-        type: "reasoning",
-        summary: [{ type: "summary_text", text: state.reasoningBuf }],
-      });
-    }
-    for (const idx in state.msgItemAdded) {
-      output.push({
-        id: `msg_${state.responseId}_${idx}`,
-        type: "message",
-        role: "assistant",
-        content: [{ type: "output_text", annotations: [], text: state.msgTextBuf[idx] || "" }],
-      });
-    }
-    for (const idx in state.funcCallIds) {
-      const callId = state.funcCallIds[idx];
-      output.push({
-        id: `fc_${callId}`,
-        type: "function_call",
-        call_id: callId,
-        name: state.funcNames[idx] || "",
-        arguments: state.funcArgsBuf[idx] || "{}",
-      });
-    }
-
-    const response: Record<string, unknown> = {
+    const response = {
       id: state.responseId,
       object: "response",
       created_at: state.created,
-      status: "completed",
+      status: state.status || "completed",
       background: false,
       error: null,
-      output,
+      output: buildCompletedOutput(state),
+      ...(state.model ? { model: state.model } : {}),
     };
+
+    if (state.incomplete_details) {
+      response.incomplete_details = state.incomplete_details;
+    }
 
     if (state.usage) {
       response.usage = state.usage;
+    }
+
+    const firstMessageKey = sortedNumericKeys(state.msgItemAdded)[0];
+    if (firstMessageKey !== undefined) {
+      response.output_text = state.msgTextBuf[firstMessageKey] || "";
     }
 
     emit("response.completed", {
@@ -425,16 +445,46 @@ function flushEvents(state) {
   return events;
 }
 
+function getResponseToolCallOutputIndex(data, fallback = 0) {
+  if (typeof data?.output_index === "number") return data.output_index;
+  return fallback;
+}
+
+function ensureResponseToolCallState(state, outputIndex) {
+  if (!state.responseToolCalls) {
+    state.responseToolCalls = new Map();
+  }
+  if (!state.responseToolCallOrder) {
+    state.responseToolCallOrder = [];
+  }
+
+  const numericIndex = Number(outputIndex);
+  if (!state.responseToolCalls.has(numericIndex)) {
+    state.responseToolCalls.set(numericIndex, {
+      outputIndex: numericIndex,
+      callId: null,
+      name: "",
+      argsBuffer: "",
+      deferred: false,
+    });
+  }
+  if (!state.responseToolCallOrder.includes(numericIndex)) {
+    state.responseToolCallOrder.push(numericIndex);
+  }
+
+  return state.responseToolCalls.get(numericIndex);
+}
+
 /**
  * Translate OpenAI Responses API chunk to OpenAI Chat Completions format
  * This is for when Codex returns data and we need to send it to an OpenAI-compatible client
  */
 export function openaiResponsesToOpenAIResponse(chunk, state) {
   if (!chunk) {
-    // Flush: send final chunk with finish_reason
     if (!state.finishReasonSent && state.started) {
       state.finishReasonSent = true;
-      const hadToolCalls = (state.toolCallIndex || 0) > 0;
+      const hadToolCalls =
+        Array.isArray(state.responseToolCallOrder) && state.responseToolCallOrder.length > 0;
       return {
         id: state.chatId || `chatcmpl-${Date.now()}`,
         object: "chat.completion.chunk",
@@ -452,20 +502,21 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     return null;
   }
 
-  // Handle different event types from Responses API
   const eventType = chunk.type || chunk.event;
   const data = chunk.data || chunk;
 
-  // Initialize state
   if (!state.started) {
     state.started = true;
     state.chatId = `chatcmpl-${Date.now()}`;
     state.created = Math.floor(Date.now() / 1000);
-    state.toolCallIndex = 0;
-    state.currentToolCallId = null;
+    state.responseToolCallOrder = [];
+    state.responseToolCalls = new Map();
   }
 
-  // Text content delta
+  if (data.response?.model) {
+    state.model = data.response.model;
+  }
+
   if (eventType === "response.output_text.delta") {
     const delta = data.delta || "";
     if (!delta) return null;
@@ -485,23 +536,20 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     };
   }
 
-  // Text content done (ignore, we handle via delta)
   if (eventType === "response.output_text.done") {
     return null;
   }
 
-  // Function call started
   if (eventType === "response.output_item.added" && data.item?.type === "function_call") {
     const item = data.item;
-    state.currentToolCallId = item.call_id || `call_${Date.now()}`;
-    state.currentToolCallArgsBuffer = ""; // reset per-call arg buffer
-    state.currentToolCallDeferred = false;
+    const outputIndex = getResponseToolCallOutputIndex(data, state.responseToolCallOrder.length);
+    const toolState = ensureResponseToolCallState(state, outputIndex);
+    toolState.callId = item.call_id || toolState.callId || `call_${Date.now()}`;
+    toolState.name = normalizeToolName(item.name) || toolState.name;
+    toolState.argsBuffer = "";
+    toolState.deferred = !toolState.name;
 
-    const toolName = normalizeToolName(item.name);
-    if (!toolName) {
-      // Some Responses providers briefly emit placeholder/empty tool names.
-      // Defer emission until output_item.done in case the final name is populated there.
-      state.currentToolCallDeferred = true;
+    if (toolState.deferred) {
       return null;
     }
 
@@ -516,11 +564,11 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
           delta: {
             tool_calls: [
               {
-                index: state.toolCallIndex,
-                id: state.currentToolCallId,
+                index: outputIndex,
+                id: toolState.callId,
                 type: "function",
                 function: {
-                  name: toolName,
+                  name: toolState.name,
                   arguments: "",
                 },
               },
@@ -532,16 +580,15 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     };
   }
 
-  // Function call arguments delta
-  // NOTE: Do NOT include `id` or `type` here - only first chunk (response.output_item.added)
-  // should have them. Including `id` on every chunk causes openai-to-claude.ts to emit
-  // a new content_block_start for each delta, breaking Claude Code ACP sessions.
   if (eventType === "response.function_call_arguments.delta") {
     const argsDelta = data.delta || "";
     if (!argsDelta) return null;
 
-    state.currentToolCallArgsBuffer = (state.currentToolCallArgsBuffer || "") + argsDelta;
-    if (state.currentToolCallDeferred) return null;
+    const outputIndex = getResponseToolCallOutputIndex(data, 0);
+    const toolState = ensureResponseToolCallState(state, outputIndex);
+    toolState.argsBuffer += argsDelta;
+
+    if (toolState.deferred) return null;
 
     return {
       id: state.chatId,
@@ -554,7 +601,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
           delta: {
             tool_calls: [
               {
-                index: state.toolCallIndex,
+                index: outputIndex,
                 function: { arguments: argsDelta },
               },
             ],
@@ -565,33 +612,26 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     };
   }
 
-  // Function call done — emit args chunk from item.arguments when no deltas were received,
-  // then advance the tool-call index. This handles Codex Responses API payloads that
-  // carry the complete arguments only in output_item.done (no preceding delta events).
   if (eventType === "response.output_item.done" && data.item?.type === "function_call") {
     const item = data.item;
-    const buffered = state.currentToolCallArgsBuffer || "";
-    const currentIndex = state.toolCallIndex; // capture before increment
-    const callId = item.call_id || state.currentToolCallId || `call_${Date.now()}`;
-    const toolName = normalizeToolName(item.name);
+    const outputIndex = getResponseToolCallOutputIndex(data, 0);
+    const toolState = ensureResponseToolCallState(state, outputIndex);
+    toolState.callId = item.call_id || toolState.callId || `call_${Date.now()}`;
+    toolState.name = normalizeToolName(item.name) || toolState.name;
 
-    if (state.currentToolCallDeferred) {
-      state.currentToolCallDeferred = false;
-      state.currentToolCallArgsBuffer = "";
-      state.currentToolCallId = null;
-
-      if (!toolName) {
+    if (toolState.deferred) {
+      toolState.deferred = false;
+      if (!toolState.name) {
         return null;
       }
-
-      state.toolCallIndex++;
 
       const argsStr =
         item.arguments != null
           ? typeof item.arguments === "string"
             ? item.arguments
             : JSON.stringify(item.arguments)
-          : buffered;
+          : toolState.argsBuffer;
+      toolState.argsBuffer = argsStr || toolState.argsBuffer;
 
       return {
         id: state.chatId,
@@ -604,12 +644,12 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
             delta: {
               tool_calls: [
                 {
-                  index: currentIndex,
-                  id: callId,
+                  index: outputIndex,
+                  id: toolState.callId,
                   type: "function",
                   function: {
-                    name: toolName,
-                    arguments: argsStr || "",
+                    name: toolState.name,
+                    arguments: toolState.argsBuffer || "",
                   },
                 },
               ],
@@ -620,14 +660,10 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       };
     }
 
-    state.toolCallIndex++;
-    state.currentToolCallArgsBuffer = ""; // reset for next tool call
-    state.currentToolCallId = null;
-
-    // Only emit if arguments exist in the done event AND they weren't already streamed via deltas
-    if (item.arguments != null && !buffered) {
+    if (item.arguments != null && !toolState.argsBuffer) {
       const argsStr =
         typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments);
+      toolState.argsBuffer = argsStr || toolState.argsBuffer;
       if (argsStr) {
         return {
           id: state.chatId,
@@ -640,7 +676,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
               delta: {
                 tool_calls: [
                   {
-                    index: currentIndex,
+                    index: outputIndex,
                     function: { arguments: argsStr },
                   },
                 ],
@@ -655,9 +691,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     return null;
   }
 
-  // Response completed
   if (eventType === "response.completed") {
-    // Extract usage from response.completed event
     const responseUsage = data.response?.usage;
     if (responseUsage && typeof responseUsage === "object") {
       const inputTokens = responseUsage.input_tokens || responseUsage.prompt_tokens || 0;
@@ -665,7 +699,6 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       const cacheReadTokens = responseUsage.cache_read_input_tokens || 0;
       const cacheCreationTokens = responseUsage.cache_creation_input_tokens || 0;
 
-      // prompt_tokens = input_tokens + cache_read + cache_creation (all prompt-side tokens)
       const promptTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
 
       state.usage = {
@@ -674,7 +707,6 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
         total_tokens: promptTokens + outputTokens,
       };
 
-      // Add prompt_tokens_details if cache tokens exist
       if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
         state.usage.prompt_tokens_details = {};
         if (cacheReadTokens > 0) {
@@ -686,13 +718,18 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       }
     }
 
+    if (data.response?.model) {
+      state.model = data.response.model;
+    }
+
     if (!state.finishReasonSent) {
       state.finishReasonSent = true;
-      const hadToolCalls = (state.toolCallIndex || 0) > 0;
+      const hadToolCalls =
+        Array.isArray(state.responseToolCallOrder) && state.responseToolCallOrder.length > 0;
       const reason = hadToolCalls ? "tool_calls" : "stop";
-      state.finishReason = reason; // Mark for usage injection in stream.js
+      state.finishReason = reason;
 
-      const finalChunk: Record<string, unknown> = {
+      const finalChunk = {
         id: state.chatId,
         object: "chat.completion.chunk",
         created: state.created,
@@ -706,7 +743,6 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
         ],
       };
 
-      // Include usage in final chunk if available
       if (state.usage && typeof state.usage === "object") {
         finalChunk.usage = state.usage;
       }
@@ -716,7 +752,6 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     return null;
   }
 
-  // Reasoning events — emit as reasoning_content in Chat format
   if (eventType === "response.reasoning_summary_text.delta") {
     const reasoningDelta = data.delta || "";
     if (!reasoningDelta) return null;
@@ -735,10 +770,8 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     };
   }
 
-  // Ignore other events
   return null;
 }
 
-// Register both directions
 register(FORMATS.OPENAI, FORMATS.OPENAI_RESPONSES, null, openaiToOpenAIResponsesResponse);
 register(FORMATS.OPENAI_RESPONSES, FORMATS.OPENAI, null, openaiResponsesToOpenAIResponse);

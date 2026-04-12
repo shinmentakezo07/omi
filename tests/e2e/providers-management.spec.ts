@@ -176,6 +176,10 @@ async function installProviderFetchMock(page: Page) {
         if (method === "POST") {
           const payload = await readJsonBody(request);
           const apiKey = typeof payload.apiKey === "string" ? payload.apiKey : "";
+          const providerSpecificData =
+            payload.providerSpecificData && typeof payload.providerSpecificData === "object"
+              ? (payload.providerSpecificData as Record<string, unknown>)
+              : {};
 
           if (!apiKey || apiKey.includes("invalid")) {
             return jsonResponse({ error: "Invalid API key" }, 400);
@@ -190,6 +194,7 @@ async function installProviderFetchMock(page: Page) {
             testStatus: "active",
             priority: typeof payload.priority === "number" ? payload.priority : 1,
             providerSpecificData: {
+              ...providerSpecificData,
               tag: typeof payload.tag === "string" ? payload.tag : "",
               validationModelId:
                 typeof payload.validationModelId === "string" ? payload.validationModelId : "",
@@ -326,5 +331,62 @@ test.describe("Providers management", () => {
     await expect.poll(async () => (await readProviderMockState(page)).deleteCalls).toBe(1);
     await expect(page.getByText("Primary OpenAI Edited")).toHaveCount(0);
     await expect(page.getByText(/no connections yet/i)).toBeVisible();
+  });
+
+  test("allows extra API keys when adding an OpenAI-compatible connection", async ({ page }) => {
+    await installProviderFetchMock(page);
+
+    await page.addInitScript(() => {
+      const state = (
+        window as Window & {
+          __providersTestState: {
+            connections: ProviderConnection[];
+          };
+        }
+      ).__providersTestState;
+
+      state.connections = [];
+    });
+
+    await page.route("**/api/provider-nodes", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          nodes: [
+            {
+              id: "openai-compatible-chat-demo",
+              type: "openai-compatible",
+              name: "Demo Compatible",
+              prefix: "demo",
+              apiType: "chat",
+              baseUrl: "https://demo.example/v1",
+            },
+          ],
+          ccCompatibleProviderEnabled: false,
+        }),
+      });
+    });
+
+    await gotoOrSkip(page, "/dashboard/providers/openai-compatible-chat-demo");
+
+    await page.getByRole("button", { name: /^add$/i }).first().click();
+    const addDialog = page.getByRole("dialog");
+    await addDialog.getByLabel(/name/i).fill("Compatible Key");
+    await addDialog.getByLabel(/api key/i).fill("sk-demo-primary");
+    await addDialog.getByLabel(/add extra key/i).fill("sk-demo-extra-1");
+    await addDialog.getByRole("button", { name: /^add$/i }).nth(1).click();
+    await addDialog.getByLabel(/add extra key/i).fill("sk-demo-extra-2");
+    await addDialog.getByRole("button", { name: /^add$/i }).nth(1).click();
+    await addDialog.getByRole("button", { name: /^save$/i }).click();
+
+    await expect.poll(async () => (await readProviderMockState(page)).connections.length).toBe(1);
+    await expect
+      .poll(
+        async () =>
+          ((await readProviderMockState(page)).connections[0]?.providerSpecificData
+            ?.extraApiKeys as string[] | undefined) ?? []
+      )
+      .toEqual(["sk-demo-extra-1", "sk-demo-extra-2"]);
   });
 });

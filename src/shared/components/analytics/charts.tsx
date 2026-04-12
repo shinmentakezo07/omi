@@ -92,21 +92,29 @@ export function StatCard({
   value,
   subValue,
   color = "text-text-main",
+  tone = "primary",
 }: {
   icon: any;
   label: any;
   value: any;
   subValue?: any;
   color?: string;
+  tone?: "primary" | "secondary";
 }) {
   return (
-    <Card className="px-4 py-3 flex flex-col gap-1">
-      <div className="flex items-center gap-2 text-text-muted text-xs uppercase font-semibold tracking-wider">
+    <Card
+      className={`flex h-full min-h-[110px] flex-col justify-between rounded-xl border border-black/5 px-4 py-4 dark:border-white/5 ${
+        tone === "secondary" ? "bg-black/[0.015] dark:bg-white/[0.015]" : ""
+      }`}
+    >
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
         <span className="material-symbols-outlined text-[16px]">{icon}</span>
         {label}
       </div>
-      <span className={`text-2xl font-bold ${color}`}>{value}</span>
-      {subValue && <span className="text-xs text-text-muted">{subValue}</span>}
+      <div className="space-y-1.5">
+        <span className={`block text-2xl font-bold leading-none ${color}`}>{value}</span>
+        {subValue && <span className="block text-xs text-text-muted">{subValue}</span>}
+      </div>
     </Card>
   );
 }

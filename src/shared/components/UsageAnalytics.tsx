@@ -109,22 +109,32 @@ export default function UsageAnalytics() {
   const ioRatio = s.completionTokens > 0 ? (s.promptTokens / s.completionTokens).toFixed(1) : "—";
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header + Time Range */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary text-[22px]">analytics</span>
-          Usage Analytics
-        </h2>
-        <div className="flex items-center gap-1 bg-black/[0.03] dark:bg-white/[0.03] rounded-lg p-1 border border-black/5 dark:border-white/5">
+    <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-4 rounded-2xl border border-black/5 bg-gradient-to-br from-surface via-surface to-black/[0.015] p-5 shadow-sm dark:border-white/5 dark:to-white/[0.02] lg:flex-row lg:items-end lg:justify-between lg:p-6">
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 rounded-full border border-black/5 bg-black/[0.03] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted dark:border-white/5 dark:bg-white/[0.04]">
+            <span className="material-symbols-outlined text-[15px] text-primary">analytics</span>
+            Usage analytics
+          </div>
+          <div>
+            <h2 className="text-2xl font-semibold text-text-main">
+              Traffic, spend, and provider mix
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-text-muted">
+              Monitor request volume, cost trends, provider distribution, and model activity across
+              the selected window.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 bg-black/[0.03] p-1.5 dark:border-white/5 dark:bg-white/[0.04]">
           {ranges.map((r) => (
             <button
               key={r.value}
               onClick={() => setRange(r.value)}
-              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+              className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 range === r.value
                   ? "bg-primary text-white shadow-sm"
-                  : "text-text-muted hover:text-text-main hover:bg-black/5 dark:hover:bg-white/5"
+                  : "text-text-muted hover:bg-black/5 hover:text-text-main dark:hover:bg-white/5"
               }`}
             >
               {r.label}
@@ -133,112 +143,147 @@ export default function UsageAnalytics() {
         </div>
       </div>
 
-      {/* Summary Cards — Row 1: Core metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-8 gap-3">
-        <StatCard
-          icon="generating_tokens"
-          label="Total Tokens"
-          value={fmt(s.totalTokens)}
-          subValue={`${fmtFull(s.totalRequests)} requests`}
-        />
-        <StatCard
-          icon="input"
-          label="Input Tokens"
-          value={fmt(s.promptTokens)}
-          color="text-primary"
-        />
-        <StatCard
-          icon="output"
-          label="Output Tokens"
-          value={fmt(s.completionTokens)}
-          color="text-emerald-500"
-        />
-        <StatCard
-          icon="payments"
-          label="Est. Cost"
-          value={fmtCost(s.totalCost)}
-          color="text-amber-500"
-        />
-        <StatCard icon="group" label="Accounts" value={s.uniqueAccounts || 0} />
-        <StatCard icon="vpn_key" label="API Keys" value={s.uniqueApiKeys || 0} />
-        <StatCard icon="model_training" label="Models" value={s.uniqueModels || 0} />
-        <StatCard
-          icon="swap_horiz"
-          label="Fallback Rate"
-          value={`${Number(s.fallbackRatePct || 0).toFixed(1)}%`}
-          subValue={`${fmtFull(s.fallbackCount || 0)} fallbacks`}
-          color="text-amber-500"
-        />
-      </div>
+      <section className="flex flex-col gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">
+            Core metrics
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            The top-level health indicators for overall usage.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+          <StatCard
+            icon="generating_tokens"
+            label="Total Tokens"
+            value={fmt(s.totalTokens)}
+            subValue={`${fmtFull(s.totalRequests)} requests`}
+          />
+          <StatCard
+            icon="input"
+            label="Input Tokens"
+            value={fmt(s.promptTokens)}
+            color="text-primary"
+          />
+          <StatCard
+            icon="output"
+            label="Output Tokens"
+            value={fmt(s.completionTokens)}
+            color="text-emerald-500"
+          />
+          <StatCard
+            icon="payments"
+            label="Est. Cost"
+            value={fmtCost(s.totalCost)}
+            color="text-amber-500"
+          />
+          <StatCard icon="group" label="Accounts" value={s.uniqueAccounts || 0} />
+          <StatCard icon="vpn_key" label="API Keys" value={s.uniqueApiKeys || 0} />
+          <StatCard icon="model_training" label="Models" value={s.uniqueModels || 0} />
+          <StatCard
+            icon="swap_horiz"
+            label="Fallback Rate"
+            value={`${Number(s.fallbackRatePct || 0).toFixed(1)}%`}
+            subValue={`${fmtFull(s.fallbackCount || 0)} fallbacks`}
+            color="text-amber-500"
+          />
+        </div>
+      </section>
 
-      {/* Summary Cards — Row 2: Derived insights */}
-      <div className="grid grid-cols-2 md:grid-cols-8 gap-3">
-        <StatCard
-          icon="speed"
-          label="Avg Tokens/Req"
-          value={fmt(avgTokensPerReq)}
-          color="text-cyan-500"
-        />
-        <StatCard
-          icon="request_quote"
-          label="Cost/Request"
-          value={fmtCost(costPerReq)}
-          color="text-orange-500"
-        />
-        <StatCard
-          icon="compare_arrows"
-          label="I/O Ratio"
-          value={`${ioRatio}x`}
-          color="text-violet-500"
-        />
-        <StatCard icon="star" label="Top Model" value={topModel} color="text-pink-500" />
-        <StatCard icon="cloud" label="Top Provider" value={topProvider} color="text-teal-500" />
-        <StatCard icon="today" label="Busiest Day" value={busiestDay} color="text-rose-500" />
-        <StatCard icon="dns" label="Providers" value={providerCount} color="text-indigo-500" />
-        <StatCard
-          icon="network_node"
-          label="Diversity Score"
-          value={`${providerDiversity.toFixed(1)}%`}
-          color="text-sky-500"
-        />
-      </div>
+      <section className="flex flex-col gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">
+            Derived insights
+          </p>
+          <p className="mt-1 text-sm text-text-muted">
+            Efficiency and diversity signals layered beneath the primary usage totals.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+          <StatCard
+            icon="speed"
+            label="Avg Tokens/Req"
+            value={fmt(avgTokensPerReq)}
+            color="text-cyan-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="request_quote"
+            label="Cost/Request"
+            value={fmtCost(costPerReq)}
+            color="text-orange-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="compare_arrows"
+            label="I/O Ratio"
+            value={`${ioRatio}x`}
+            color="text-violet-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="star"
+            label="Top Model"
+            value={topModel}
+            color="text-pink-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="cloud"
+            label="Top Provider"
+            value={topProvider}
+            color="text-teal-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="today"
+            label="Busiest Day"
+            value={busiestDay}
+            color="text-rose-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="dns"
+            label="Providers"
+            value={providerCount}
+            color="text-indigo-500"
+            tone="secondary"
+          />
+          <StatCard
+            icon="network_node"
+            label="Diversity Score"
+            value={`${providerDiversity.toFixed(1)}%`}
+            color="text-sky-500"
+            tone="secondary"
+          />
+        </div>
+      </section>
 
-      {/* Activity Heatmap + Weekly Widgets */}
-      <div
-        style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, alignItems: "stretch" }}
-      >
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.9fr)] xl:items-stretch">
         <ActivityHeatmap activityMap={analytics?.activityMap} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="flex flex-col gap-4">
           <MostActiveDay7d activityMap={analytics?.activityMap} />
           <WeeklySquares7d activityMap={analytics?.activityMap} />
         </div>
-      </div>
+      </section>
 
-      {/* Token & Cost Trend + Provider Cost Donut */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <DailyTrendChart dailyTrend={analytics?.dailyTrend} />
         <ProviderCostDonut byProvider={analytics?.byProvider} />
-      </div>
+      </section>
 
-      {/* Model Usage Over Time (stacked area) */}
       <ModelOverTimeChart
         dailyByModel={analytics?.dailyByModel}
         modelNames={analytics?.modelNames}
       />
 
-      {/* Account Donut + API Key Donut */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <AccountDonut byAccount={analytics?.byAccount} />
         <ApiKeyDonut byApiKey={analytics?.byApiKey} />
-      </div>
+      </section>
 
-      {/* Provider Breakdown Table */}
       <ProviderTable byProvider={analytics?.byProvider} />
-
-      {/* API Key Table */}
       <ApiKeyTable byApiKey={analytics?.byApiKey} />
-
-      {/* Model Breakdown Table */}
       <ModelTable byModel={analytics?.byModel} summary={s} />
     </div>
   );

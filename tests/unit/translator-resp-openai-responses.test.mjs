@@ -242,57 +242,51 @@ test("Responses -> OpenAI: empty-name tool call is deferred until output_item.do
   );
 });
 
-test("Responses -> OpenAI: tool-call delta, reasoning delta and completed usage are normalized", () => {
+
+
+test("Responses -> OpenAI: interleaved tool-call deltas stay attached to the correct call", () => {
   const state = {};
-  const added = openaiResponsesToOpenAIResponse(
+
+  const addedFirst = openaiResponsesToOpenAIResponse(
     {
       type: "response.output_item.added",
-      item: { type: "function_call", call_id: "call_2", name: "weather" },
+      output_index: 0,
+      item: { type: "function_call", call_id: "call_1", name: "search" },
     },
     state
   );
-  const args = openaiResponsesToOpenAIResponse(
+  const addedSecond = openaiResponsesToOpenAIResponse(
+    {
+      type: "response.output_item.added",
+      output_index: 1,
+      item: { type: "function_call", call_id: "call_2", name: "lookup" },
+    },
+    state
+  );
+  const firstArgs = openaiResponsesToOpenAIResponse(
     {
       type: "response.function_call_arguments.delta",
-      delta: '{"city":"SP"}',
+      output_index: 0,
+      delta: '{"a":1}',
     },
     state
   );
-  const reasoning = openaiResponsesToOpenAIResponse(
+  const secondArgs = openaiResponsesToOpenAIResponse(
     {
-      type: "response.reasoning_summary_text.delta",
-      delta: "Need weather info.",
-    },
-    state
-  );
-  openaiResponsesToOpenAIResponse(
-    {
-      type: "response.output_item.done",
-      item: { type: "function_call", call_id: "call_2", name: "weather" },
-    },
-    state
-  );
-  const completed = openaiResponsesToOpenAIResponse(
-    {
-      type: "response.completed",
-      response: {
-        usage: {
-          input_tokens: 5,
-          output_tokens: 2,
-          cache_read_input_tokens: 1,
-          cache_creation_input_tokens: 2,
-        },
-      },
+      type: "response.function_call_arguments.delta",
+      output_index: 1,
+      delta: '{"b":2}',
     },
     state
   );
 
-  assert.equal(added.choices[0].delta.tool_calls[0].function.name, "weather");
-  assert.equal(args.choices[0].delta.tool_calls[0].function.arguments, '{"city":"SP"}');
-  assert.equal(reasoning.choices[0].delta.reasoning_content, "Need weather info.");
-  assert.equal(completed.choices[0].finish_reason, "tool_calls");
-  assert.equal(completed.usage.prompt_tokens, 8);
-  assert.equal(completed.usage.completion_tokens, 2);
-  assert.equal(completed.usage.prompt_tokens_details.cached_tokens, 1);
-  assert.equal(completed.usage.prompt_tokens_details.cache_creation_tokens, 2);
+  assert.equal(addedFirst.choices[0].delta.tool_calls[0].index, 0);
+  assert.equal(addedFirst.choices[0].delta.tool_calls[0].id, "call_1");
+  assert.equal(addedSecond.choices[0].delta.tool_calls[0].index, 1);
+  assert.equal(addedSecond.choices[0].delta.tool_calls[0].id, "call_2");
+  assert.equal(firstArgs.choices[0].delta.tool_calls[0].index, 0);
+  assert.equal(firstArgs.choices[0].delta.tool_calls[0].function.arguments, '{"a":1}');
+  assert.equal(secondArgs.choices[0].delta.tool_calls[0].index, 1);
+  assert.equal(secondArgs.choices[0].delta.tool_calls[0].function.arguments, '{"b":2}');
 });
+

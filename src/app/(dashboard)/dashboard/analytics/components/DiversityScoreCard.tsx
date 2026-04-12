@@ -17,6 +17,7 @@ interface DiversityReport {
 export default function DiversityScoreCard() {
   const [data, setData] = useState<DiversityReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,9 +32,13 @@ export default function DiversityScoreCard() {
         const json = (await res.json()) as DiversityReport;
         if (!cancelled) {
           setData(json);
+          setError(null);
         }
-      } catch (error) {
-        console.error(error);
+      } catch {
+        if (!cancelled) {
+          setData(null);
+          setError("Provider diversity is temporarily unavailable.");
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -48,10 +53,23 @@ export default function DiversityScoreCard() {
     };
   }, []);
 
-  if (loading || !data) {
+  if (loading) {
     return (
-      <Card className="p-5 flex flex-col justify-center items-center min-h-[220px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <Card className="flex min-h-[240px] flex-col items-center justify-center gap-4 rounded-2xl p-6">
+        <div className="h-9 w-9 animate-spin rounded-full border-b-2 border-primary" />
+        <div className="text-sm text-text-muted">Loading provider diversity…</div>
+      </Card>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <Card className="flex min-h-[240px] flex-col items-center justify-center gap-3 rounded-2xl p-6 text-center">
+        <span className="material-symbols-outlined text-[28px] text-text-muted">pie_chart</span>
+        <div className="text-sm font-medium text-text-main">Provider diversity unavailable</div>
+        <div className="max-w-xs text-sm text-text-muted">
+          {error || "Provider diversity metrics will appear once traffic data is available."}
+        </div>
       </Card>
     );
   }

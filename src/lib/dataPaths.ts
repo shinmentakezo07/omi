@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "path";
 import os from "os";
 
@@ -16,6 +17,15 @@ function normalizeConfiguredPath(dir: unknown): string | null {
   const trimmed = dir.trim();
   if (!trimmed) return null;
   return path.resolve(trimmed);
+}
+
+function ensureUsableDataDir(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    return fs.statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export function getLegacyDotDataDir() {
@@ -42,10 +52,19 @@ export function getDefaultDataDir() {
 export function resolveDataDir({ isCloud = false }: { isCloud?: boolean } = {}): string {
   if (isCloud) return "/tmp";
 
-  const configured = normalizeConfiguredPath(process.env.DATA_DIR);
-  if (configured) return configured;
+  const candidates = [
+    normalizeConfiguredPath(process.env.DATA_DIR),
+    getDefaultDataDir(),
+    path.join(os.tmpdir(), APP_NAME),
+  ].filter((candidate): candidate is string => Boolean(candidate));
 
-  return getDefaultDataDir();
+  for (const candidate of candidates) {
+    if (ensureUsableDataDir(candidate)) {
+      return candidate;
+    }
+  }
+
+  return path.join(process.cwd(), APP_NAME);
 }
 
 export function isSamePath(a: string | null | undefined, b: string | null | undefined): boolean {

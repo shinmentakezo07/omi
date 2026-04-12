@@ -33,6 +33,99 @@ function extractMessageOutputText(item: JsonRecord): string {
   return text;
 }
 
+function extractResponsesOutput(response: JsonRecord): JsonRecord[] {
+  return Array.isArray(response.output)
+    ? response.output.map((item) => toRecord(item)).filter((item) => Object.keys(item).length > 0)
+    : [];
+}
+
+function extractResponsesUsage(response: JsonRecord, responseRoot: JsonRecord): JsonRecord {
+  return toRecord(response.usage ?? responseRoot.usage);
+}
+
+function copyOutputPartForOpenAI(part: JsonRecord): JsonRecord {
+  if (part.type === "output_text") {
+    const copied: JsonRecord = {
+      type: "output_text",
+      text: toString(part.text),
+    };
+
+    if (Array.isArray(part.annotations)) copied.annotations = part.annotations;
+    if (Array.isArray(part.logprobs)) copied.logprobs = part.logprobs;
+    return copied;
+  }
+
+  return { ...part };
+}
+
+function extractResponsesMessageContent(item: JsonRecord): JsonRecord[] {
+  if (!Array.isArray(item.content)) return [];
+
+  return item.content
+    .map((part) => toRecord(part))
+    .filter((part) => Object.keys(part).length > 0)
+    .map((part) => copyOutputPartForOpenAI(part));
+}
+
+function extractResponsesReasoningContent(output: JsonRecord[]): string {
+  let reasoningContent = "";
+
+  for (const item of output) {
+    if (item.type === "message" && Array.isArray(item.content)) {
+      for (const part of item.content) {
+        const partObj = toRecord(part);
+        if (partObj.type === "summary_text" && typeof partObj.text === "string") {
+          reasoningContent += partObj.text;
+        }
+      }
+      continue;
+    }
+
+    if (item.type === "reasoning" && Array.isArray(item.summary)) {
+      for (const part of item.summary) {
+        const partObj = toRecord(part);
+        if (partObj.type === "summary_text" && typeof partObj.text === "string") {
+          reasoningContent += partObj.text;
+        }
+      }
+    }
+  }
+
+  return reasoningContent;
+}
+
+function extractResponsesToolCalls(
+  output: JsonRecord[],
+  toolNameMap?: Map<string, string> | null
+): JsonRecord[] {
+  const toolCalls: JsonRecord[] = [];
+
+  for (const itemObj of output) {
+    if (itemObj.type !== "function_call") continue;
+
+    const callId =
+      toString(itemObj.call_id) ||
+      toString(itemObj.id) ||
+      `call_${Date.now()}_${toolCalls.length}`;
+    const fnArgs =
+      typeof itemObj.arguments === "string"
+        ? itemObj.arguments
+        : JSON.stringify(itemObj.arguments || {});
+    const rawName = toString(itemObj.name);
+    const resolvedName = toolNameMap?.get(rawName) ?? rawName;
+    toolCalls.push({
+      id: callId,
+      type: "function",
+      function: {
+        name: resolvedName,
+        arguments: fnArgs,
+      },
+    });
+  }
+
+  return toolCalls;
+}
+
 /**
  * T19: Pick the last non-empty message output text from Responses API output.
  * Falls back to the last message item even when all message texts are empty.
@@ -91,58 +184,26 @@ export function translateNonStreamingResponse(
       responseRoot.object === "response"
         ? responseRoot
         : toRecord(responseRoot.response ?? responseRoot);
-    const output = Array.isArray(response.output) ? response.output : [];
-    const usage = toRecord(response.usage ?? responseRoot.usage);
+    const output = extractResponsesOutput(response);
+    const usage = extractResponsesUsage(response, responseRoot);
 
     const messageSelection = findBestMessageText(output);
     let textContent = messageSelection.text;
-    let reasoningContent = "";
-    const toolCalls: JsonRecord[] = [];
-
-    for (const item of output) {
-      if (!item || typeof item !== "object") continue;
-      const itemObj = toRecord(item);
-
-      if (itemObj.type === "message" && Array.isArray(itemObj.content)) {
-        for (const part of itemObj.content) {
-          if (!part || typeof part !== "object") continue;
-          const partObj = toRecord(part);
-          if (partObj.type === "summary_text" && typeof partObj.text === "string") {
-            reasoningContent += partObj.text;
-          }
-        }
-      } else if (itemObj.type === "reasoning" && Array.isArray(itemObj.summary)) {
-        for (const part of itemObj.summary) {
-          const partObj = toRecord(part);
-          if (partObj.type === "summary_text" && typeof partObj.text === "string") {
-            reasoningContent += partObj.text;
-          }
-        }
-      } else if (itemObj.type === "function_call") {
-        const callId =
-          toString(itemObj.call_id) ||
-          toString(itemObj.id) ||
-          `call_${Date.now()}_${toolCalls.length}`;
-        const fnArgs =
-          typeof itemObj.arguments === "string"
-            ? itemObj.arguments
-            : JSON.stringify(itemObj.arguments || {});
-        const rawName = toString(itemObj.name);
-        // Strip Claude OAuth proxy_ prefix using toolNameMap
-        const resolvedName = toolNameMap?.get(rawName) ?? rawName;
-        toolCalls.push({
-          id: callId,
-          type: "function",
-          function: {
-            name: resolvedName,
-            arguments: fnArgs,
-          },
-        });
-      }
-    }
+    const reasoningContent = extractResponsesReasoningContent(output);
+    const toolCalls = extractResponsesToolCalls(output, toolNameMap);
+    const selectedMessage =
+      messageSelection.selectedMessageIndex >= 0
+        ? messageSelection.messageItems[messageSelection.selectedMessageIndex]
+        : null;
+    const selectedMessageContent = selectedMessage
+      ? extractResponsesMessageContent(selectedMessage)
+      : [];
 
     const message: JsonRecord = { role: "assistant" };
-    if (textContent) {
+    if (selectedMessageContent.length > 0) {
+      const hasStructuredContent = selectedMessageContent.some((part) => part.type !== "output_text");
+      message.content = hasStructuredContent ? selectedMessageContent : textContent;
+    } else if (textContent) {
       message.content = textContent;
     }
     if (reasoningContent) {

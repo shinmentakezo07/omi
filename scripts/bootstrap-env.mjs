@@ -19,9 +19,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
@@ -33,22 +33,52 @@ const OPTIONAL_OAUTH_SECRETS = [
   { key: "GEMINI_OAUTH_CLIENT_SECRET", label: "Gemini OAuth" },
 ];
 
-// ── Resolve DATA_DIR (mirrors dataPaths.ts logic) ───────────────────────────
-function resolveDataDir(overridePath, env = process.env) {
-  if (overridePath?.trim()) return resolve(overridePath);
+function normalizeConfiguredPath(dir) {
+  if (typeof dir !== "string") return null;
+  const trimmed = dir.trim();
+  if (!trimmed) return null;
+  return resolve(trimmed);
+}
 
-  const configured = env.DATA_DIR?.trim();
-  if (configured) return resolve(configured);
+function ensureUsableDataDir(dir) {
+  try {
+    mkdirSync(dir, { recursive: true });
+    return statSync(dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
+function getDefaultDataDir(env = process.env) {
   if (process.platform === "win32") {
     const appData = env.APPDATA || join(homedir(), "AppData", "Roaming");
     return join(appData, "omniroute");
   }
 
-  const xdg = env.XDG_CONFIG_HOME?.trim();
-  if (xdg) return join(resolve(xdg), "omniroute");
+  const xdg = normalizeConfiguredPath(env.XDG_CONFIG_HOME);
+  if (xdg) {
+    return join(xdg, "omniroute");
+  }
 
   return join(homedir(), ".omniroute");
+}
+
+// ── Resolve DATA_DIR (aligned with src/lib/dataPaths.ts) ────────────────────
+function resolveDataDir(overridePath, env = process.env) {
+  const candidates = [
+    normalizeConfiguredPath(overridePath),
+    normalizeConfiguredPath(env.DATA_DIR),
+    getDefaultDataDir(env),
+    join(tmpdir(), "omniroute"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (ensureUsableDataDir(candidate)) {
+      return candidate;
+    }
+  }
+
+  return join(process.cwd(), "omniroute");
 }
 
 function getPreferredEnvFilePath(env = process.env) {
@@ -58,7 +88,7 @@ function getPreferredEnvFilePath(env = process.env) {
     candidates.push(join(resolve(env.DATA_DIR.trim()), ".env"));
   }
 
-  candidates.push(join(resolveDataDir(null, env), ".env"));
+  candidates.push(join(getDefaultDataDir(env), ".env"));
   candidates.push(join(process.cwd(), ".env"));
 
   return candidates.find((filePath) => existsSync(filePath)) ?? null;
@@ -140,7 +170,7 @@ export function bootstrapEnv({ dataDirOverride, quiet = false } = {}) {
 
   // ── Layer 2: Load the same preferred .env that the CLI wrapper uses ───────
   // This keeps run-next / run-standalone consistent with `bin/omniroute.mjs`.
-  const merged = { ...persisted, ...preferredEnv, ...process.env };
+  const merged = { ...persisted, ...preferredEnv, ...process.env, DATA_DIR: dataDir };
 
   // ── Auto-generate required secrets ────────────────────────────────────────
   let needsPersist = false;
@@ -218,7 +248,7 @@ export function bootstrapEnv({ dataDirOverride, quiet = false } = {}) {
 // ── CLI usage: node scripts/bootstrap-env.mjs ──────────────────────────────
 if (process.argv[1] && process.argv[1].endsWith("bootstrap-env.mjs")) {
   const env = bootstrapEnv();
-  process.stderr.write(`[bootstrap] Done. DATA_DIR resolved to: ${resolveDataDir()}\n`);
+  process.stderr.write(`[bootstrap] Done. DATA_DIR resolved to: ${env.DATA_DIR}\n`);
   process.stderr.write(`[bootstrap] JWT_SECRET length: ${env.JWT_SECRET?.length ?? 0}\n`);
   process.stderr.write(
     `[bootstrap] STORAGE_ENCRYPTION_KEY length: ${env.STORAGE_ENCRYPTION_KEY?.length ?? 0}\n`

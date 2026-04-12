@@ -21,7 +21,12 @@ if (mode === "dev" && env.OMNIROUTE_USE_TURBOPACK !== "1") {
   args.splice(2, 0, "--webpack");
 }
 
+const childEnv = withRuntimePortEnv(env, runtimePorts);
+if (mode === "dev") {
+  childEnv.NODE_ENV = "development";
+}
+
 spawnWithForwardedSignals(process.execPath, args, {
   stdio: "inherit",
-  env: withRuntimePortEnv(env, runtimePorts),
+  env: childEnv,
 });

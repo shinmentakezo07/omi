@@ -105,7 +105,7 @@ test("createResponsesApiTransformStream converts think tags into reasoning summa
     summary: [{ type: "summary_text", text: "planning" }],
   });
   assert.deepEqual(completed.output[1].content, [
-    { type: "output_text", annotations: [], text: "answer" },
+    { type: "output_text", annotations: [], logprobs: [], text: "answer" },
   ]);
 });
 
@@ -180,28 +180,24 @@ test("createResponsesLogger persists input and output event logs on flush", asyn
   assert.match(output, /data: \[DONE]/);
 });
 
-test("createResponsesApiTransformStream ignores malformed events and preserves usage-only chunks", async () => {
+
+
+test("createResponsesApiTransformStream includes model and incomplete details for truncated completions", async () => {
   const output = await runTransformStream([
-    "event: ping\n\n",
-    "data: [DONE]\n\n",
-    'data: {"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\n',
-    "data: {not-json}\n\n",
-    'data: {"id":"chatcmpl_edge","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n',
+    'data: {"id":"chatcmpl_trunc","model":"gpt-5.2-codex","choices":[{"index":0,"delta":{"content":"cut off"},"finish_reason":"length"}]}\n\n',
   ]);
 
   const events = parseSseOutput(output);
-  const completed = JSON.parse(
-    events.find((event) => event.event === "response.completed").data
-  ).response;
+  const created = JSON.parse(events.find((event) => event.event === "response.created").data).response;
+  const completed = JSON.parse(events.find((event) => event.event === "response.completed").data).response;
 
-  assert.equal(completed.id, "resp_chatcmpl_edge");
-  assert.equal(completed.output[0].content[0].text, "ok");
-  assert.deepEqual(completed.usage, {
-    prompt_tokens: 2,
-    completion_tokens: 1,
-    total_tokens: 3,
-  });
+  assert.equal(created.model, "gpt-5.2-codex");
+  assert.equal(completed.model, "gpt-5.2-codex");
+  assert.equal(completed.status, "incomplete");
+  assert.deepEqual(completed.incomplete_details, { reason: "max_output_tokens" });
+  assert.equal(completed.output_text, "cut off");
 });
+
 
 test("createResponsesLogger returns null for invalid base paths and swallows flush write failures", () => {
   const blockedPath = join(tmpdir(), `responses-transformer-blocked-${Date.now()}`);

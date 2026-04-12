@@ -1,5 +1,11 @@
-import * as fs from "fs";
-import * as path from "path";
+function buildOutputTextPart(text) {
+  return { type: "output_text", annotations: [], logprobs: [], text };
+}
+
+function sortedNumericKeys(record) {
+  return Object.keys(record).sort((a, b) => Number(a) - Number(b));
+}
+
 /**
  * Responses API Transformer
  * Converts OpenAI Chat Completions SSE to Codex Responses API SSE format
@@ -32,8 +38,14 @@ async function getPath() {
 
 // Create log directory for responses (Node.js only)
 export function createResponsesLogger(model, logsDir = null) {
-  // Skip logging in worker environment (no fs)
-  if (typeof fs.mkdirSync !== "function") {
+  if (typeof process === "undefined" || typeof process.getBuiltinModule !== "function") {
+    return null;
+  }
+
+  const fs = process.getBuiltinModule("fs");
+  const path = process.getBuiltinModule("path");
+
+  if (!fs || !path || typeof fs.mkdirSync !== "function" || typeof path.join !== "function") {
     return null;
   }
 
@@ -81,6 +93,12 @@ export function createResponsesApiTransformStream(logger = null) {
     responseId: `resp_${Date.now()}`,
     created: Math.floor(Date.now() / 1000),
     started: false,
+    model: null,
+    finishReason: null,
+    status: "in_progress",
+    incompleteDetails: null,
+    responseMetadata: {},
+    responseTopLevel: {},
     msgTextBuf: {},
     msgItemAdded: {},
     msgContentAdded: {},
@@ -202,7 +220,7 @@ export function createResponsesApiTransformStream(logger = null) {
         item_id: msgId,
         output_index: parseInt(idx),
         content_index: 0,
-        part: { type: "output_text", annotations: [], logprobs: [], text: fullText },
+        part: buildOutputTextPart(fullText),
       });
 
       emit(controller, "response.output_item.done", {
@@ -211,11 +229,81 @@ export function createResponsesApiTransformStream(logger = null) {
         item: {
           id: msgId,
           type: "message",
-          content: [{ type: "output_text", annotations: [], logprobs: [], text: fullText }],
+          content: [buildOutputTextPart(fullText)],
           role: "assistant",
         },
       });
     }
+  };
+
+  const buildCompletedOutput = () => {
+    const output = [];
+
+    if (state.reasoningId) {
+      output.push({
+        id: state.reasoningId,
+        type: "reasoning",
+        summary: [{ type: "summary_text", text: state.reasoningBuf }],
+      });
+    }
+
+    for (const idx of sortedNumericKeys(state.msgItemAdded)) {
+      output.push({
+        id: `msg_${state.responseId}_${idx}`,
+        type: "message",
+        role: "assistant",
+        content: [buildOutputTextPart(state.msgTextBuf[idx] || "")],
+      });
+    }
+
+    for (const idx of sortedNumericKeys(state.funcCallIds)) {
+      const callId = state.funcCallIds[idx];
+      output.push({
+        id: `fc_${callId}`,
+        type: "function_call",
+        call_id: callId,
+        name: state.funcNames[idx] || "",
+        arguments: state.funcArgsBuf[idx] || "{}",
+      });
+    }
+
+    return output;
+  };
+
+  const buildResponseEnvelope = (statusOverride = state.status) => {
+    const response = {
+      id: state.responseId,
+      object: "response",
+      created_at: state.created,
+      status: statusOverride,
+      background: false,
+      error: null,
+      output: buildCompletedOutput(),
+      ...state.responseTopLevel,
+    };
+
+    if (state.model) {
+      response.model = state.model;
+    }
+
+    if (Object.keys(state.responseMetadata).length > 0) {
+      response.metadata = state.responseMetadata;
+    }
+
+    if (state.incompleteDetails) {
+      response.incomplete_details = state.incompleteDetails;
+    }
+
+    if (state.usage) {
+      response.usage = state.usage;
+    }
+
+    const firstMessageKey = sortedNumericKeys(state.msgItemAdded)[0];
+    if (firstMessageKey !== undefined) {
+      response.output_text = state.msgTextBuf[firstMessageKey] || "";
+    }
+
+    return response;
   };
 
   const closeToolCall = (controller, idx) => {
@@ -251,51 +339,9 @@ export function createResponsesApiTransformStream(logger = null) {
     if (!state.completedSent) {
       state.completedSent = true;
 
-      // Build output from accumulated state
-      const output = [];
-      if (state.reasoningId) {
-        output.push({
-          id: state.reasoningId,
-          type: "reasoning",
-          summary: [{ type: "summary_text", text: state.reasoningBuf }],
-        });
-      }
-      for (const idx in state.msgItemAdded) {
-        output.push({
-          id: `msg_${state.responseId}_${idx}`,
-          type: "message",
-          role: "assistant",
-          content: [{ type: "output_text", annotations: [], text: state.msgTextBuf[idx] || "" }],
-        });
-      }
-      for (const idx in state.funcCallIds) {
-        const callId = state.funcCallIds[idx];
-        output.push({
-          id: `fc_${callId}`,
-          type: "function_call",
-          call_id: callId,
-          name: state.funcNames[idx] || "",
-          arguments: state.funcArgsBuf[idx] || "{}",
-        });
-      }
-
-      const response: Record<string, unknown> = {
-        id: state.responseId,
-        object: "response",
-        created_at: state.created,
-        status: "completed",
-        background: false,
-        error: null,
-        output,
-      };
-
-      if (state.usage) {
-        response.usage = state.usage;
-      }
-
       emit(controller, "response.completed", {
         type: "response.completed",
-        response,
+        response: buildResponseEnvelope(state.status),
       });
     }
   };
@@ -335,6 +381,17 @@ export function createResponsesApiTransformStream(logger = null) {
         const choice = parsed.choices[0];
         const idx = choice.index || 0;
         const delta = choice.delta || {};
+        state.model = parsed.model || state.model;
+
+        if (choice.finish_reason === "length") {
+          state.status = "incomplete";
+          state.incompleteDetails = { reason: "max_output_tokens" };
+          state.finishReason = "length";
+        } else if (choice.finish_reason) {
+          state.status = "completed";
+          state.incompleteDetails = null;
+          state.finishReason = choice.finish_reason;
+        }
 
         // Emit initial events
         if (!state.started) {
@@ -344,13 +401,9 @@ export function createResponsesApiTransformStream(logger = null) {
           emit(controller, "response.created", {
             type: "response.created",
             response: {
-              id: state.responseId,
-              object: "response",
-              created_at: state.created,
-              status: "in_progress",
-              background: false,
-              error: null,
+              ...buildResponseEnvelope("in_progress"),
               output: [],
+              status: "in_progress",
             },
           });
 
@@ -361,6 +414,7 @@ export function createResponsesApiTransformStream(logger = null) {
               object: "response",
               created_at: state.created,
               status: "in_progress",
+              ...(state.model ? { model: state.model } : {}),
             },
           });
         }

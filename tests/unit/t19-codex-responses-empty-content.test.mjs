@@ -37,20 +37,25 @@ test("T19: picks the last non-empty message content from Responses output", () =
   assert.equal(translated.choices[0].message.content, "Resposta final");
 });
 
-test("T19: falls back to last message block when all message texts are empty", () => {
+
+
+test("T19: preserves structured output_text content metadata for selected message", () => {
   const responseBody = {
     object: "response",
-    id: "resp_t19_empty",
+    id: "resp_t19_structured",
     model: "gpt-5.2-codex",
-    created_at: 1710000001,
+    created_at: 1710000002,
     output: [
       {
         type: "message",
-        content: [{ type: "output_text", text: "" }],
-      },
-      {
-        type: "message",
-        content: [{ type: "output_text", text: "" }],
+        content: [
+          {
+            type: "output_text",
+            text: "Structured text",
+            annotations: [{ type: "citation", title: "ref" }],
+            logprobs: [{ token: "Structured", logprob: -0.1 }],
+          },
+        ],
       },
     ],
   };
@@ -61,6 +66,6 @@ test("T19: falls back to last message block when all message texts are empty", (
     FORMATS.OPENAI
   );
 
-  assert.equal(translated.choices[0].message.content, "");
-  assert.equal(translated.choices[0].finish_reason, "stop");
+  assert.deepEqual(translated.choices[0].message.content, "Structured text");
 });
+

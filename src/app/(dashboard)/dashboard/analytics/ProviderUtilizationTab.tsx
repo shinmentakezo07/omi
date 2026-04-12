@@ -195,7 +195,7 @@ export default function ProviderUtilizationTab() {
         subtitle={RANGE_LABELS[range]}
         icon="monitoring"
         action={
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-3 max-lg:w-full">
             <div className="flex rounded-lg border border-border/50 bg-black/5 p-1 dark:bg-white/5">
               <button
                 onClick={() => setAggregateBy("provider")}
