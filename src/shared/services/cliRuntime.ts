@@ -379,6 +379,8 @@ const getKnownToolPaths = (toolId: string): string[] => {
   const home = os.homedir();
   const paths: string[] = [];
 
+  const explicitNpmPrefix = String(process.env.npm_config_prefix || "").trim();
+  const hasExplicitNpmPrefix = explicitNpmPrefix && path.isAbsolute(explicitNpmPrefix);
   const npmPrefix = getNpmGlobalPrefix();
   const nvmNodePath = getNvmNodePath();
 
@@ -428,7 +430,7 @@ const getKnownToolPaths = (toolId: string): string[] => {
 
     for (const [winName] of bins) {
       if (npmPrefix) paths.push(path.join(npmPrefix, winName));
-      if (appData) {
+      if (!hasExplicitNpmPrefix && appData) {
         const appDataPath = path.join(appData, "npm", winName);
         if (
           !npmPrefix ||
@@ -437,31 +439,34 @@ const getKnownToolPaths = (toolId: string): string[] => {
           paths.push(appDataPath);
         }
       }
-      if (nvmNodePath) paths.push(path.join(nvmNodePath, winName));
+      if (!hasExplicitNpmPrefix && nvmNodePath) paths.push(path.join(nvmNodePath, winName));
     }
   } else {
     for (const [, posixName] of bins) {
-      const nodeBinDir = path.dirname(process.execPath);
-      paths.push(path.join(nodeBinDir, posixName));
+      if (!hasExplicitNpmPrefix) {
+        const nodeBinDir = path.dirname(process.execPath);
+        paths.push(path.join(nodeBinDir, posixName));
+      }
 
       if (npmPrefix) {
         paths.push(path.join(npmPrefix, "bin", posixName));
       }
 
-      paths.push(path.join(home, ".local", "bin", posixName));
-      // Only add system paths if they exist (avoids unnecessary stat calls)
-      if (fsSync.existsSync("/usr/local/bin")) {
-        paths.push(path.join("/usr", "local", "bin", posixName));
-      }
-      if (fsSync.existsSync("/usr/bin")) {
-        paths.push(path.join("/usr", "bin", posixName));
-      }
+      if (!hasExplicitNpmPrefix) {
+        paths.push(path.join(home, ".local", "bin", posixName));
+        if (fsSync.existsSync("/usr/local/bin")) {
+          paths.push(path.join("/usr", "local", "bin", posixName));
+        }
+        if (fsSync.existsSync("/usr/bin")) {
+          paths.push(path.join("/usr", "bin", posixName));
+        }
 
-      if (toolId === "opencode") {
-        paths.push(path.join(home, ".opencode", "bin", posixName));
-      }
-      if (toolId === "claude") {
-        paths.push(path.join(home, ".claude", "bin", posixName));
+        if (toolId === "opencode") {
+          paths.push(path.join(home, ".opencode", "bin", posixName));
+        }
+        if (toolId === "claude") {
+          paths.push(path.join(home, ".claude", "bin", posixName));
+        }
       }
     }
   }
@@ -635,8 +640,16 @@ const locateCommandCandidate = async (
     return { command: null, installed: false, commandPath: null, reason: "missing_command" };
   }
 
-  // SECURITY: First check known installation paths for this specific tool
-  // This avoids searching PATH and reduces attack surface
+  // Prefer PATH lookup first so CLI_EXTRA_PATHS and explicit runtime environment
+  // take precedence over ambient machine-wide installs. Known paths remain a
+  // fallback when the command is not otherwise discoverable.
+  for (const command of commands) {
+    const located = await locateCommand(command, env);
+    if (located.installed || located.reason !== "not_found") {
+      return { command, ...located };
+    }
+  }
+
   if (toolId) {
     const knownPaths = getKnownToolPaths(toolId);
     for (const knownPath of knownPaths) {
@@ -649,14 +662,6 @@ const locateCommandCandidate = async (
           reason: null,
         };
       }
-    }
-  }
-
-  // Fallback: search PATH (user can set CLI_EXTRA_PATHS if needed)
-  for (const command of commands) {
-    const located = await locateCommand(command, env);
-    if (located.installed || located.reason !== "not_found") {
-      return { command, ...located };
     }
   }
 

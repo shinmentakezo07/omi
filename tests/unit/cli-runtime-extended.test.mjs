@@ -202,13 +202,14 @@ test("getCliRuntimeStatus resolves known binaries from npm global prefix discove
 
 test("getCliRuntimeStatus ignores suspicious known-path binaries and symlink escapes", async () => {
   const prefixDir = createTempDir("omniroute-cli-suspicious-");
+  const isolatedPathDir = createTempDir("omniroute-cli-isolated-path-");
   const binDir = path.join(prefixDir, process.platform === "win32" ? "" : "bin");
   const scriptName = process.platform === "win32" ? "qodercli.exe" : "qodercli";
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(binDir, scriptName), "");
 
   process.env.npm_config_prefix = prefixDir;
-  process.env.PATH = process.platform === "win32" ? process.env.PATH || "" : "/bin:/usr/bin";
+  process.env.PATH = process.platform === "win32" ? process.env.PATH || "" : isolatedPathDir;
 
   const cliRuntime = await importFresh("suspicious-size");
   const suspiciousStatus = await cliRuntime.getCliRuntimeStatus("qoder");
