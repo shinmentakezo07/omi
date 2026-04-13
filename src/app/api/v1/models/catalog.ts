@@ -532,6 +532,10 @@ async function buildCatalogPayload(): Promise<CatalogPayload> {
 
 MODELS_RESPONSE_CACHE.define("catalogPayload", async () => buildCatalogPayload());
 
+async function getCatalogPayload() {
+  return buildCatalogPayload();
+}
+
 /**
  * Build unified OpenAI-compatible model catalog response.
  * Reused by `/api/v1/models` and `/api/v1` to avoid semantic drift (T09).
@@ -543,7 +547,7 @@ export async function getUnifiedModelsResponse(
   }
 ) {
   try {
-    const { settings, models } = await MODELS_RESPONSE_CACHE.catalogPayload("shared");
+    const { settings, models } = await getCatalogPayload();
 
     if (settings.requireAuthForModels === true) {
       if (!(await isAuthenticated(request))) {

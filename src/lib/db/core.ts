@@ -426,6 +426,19 @@ export function getDbInstance(): SqliteDatabase {
   if (!sqliteFile) {
     throw new Error("SQLITE_FILE is unavailable for local mode");
   }
+
+  if (typeof process.env.DATA_DIR === "string" && process.env.DATA_DIR.trim()) {
+    const explicitDataDir = process.env.DATA_DIR.trim();
+    try {
+      const stat = fs.statSync(explicitDataDir);
+      if (!stat.isDirectory()) {
+        throw new Error(`DATA_DIR is not a directory: ${explicitDataDir}`);
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`unable to open database file: ${message}`);
+    }
+  }
   const jsonDbFile = JSON_DB_FILE;
 
   // Detect and handle old schema format — preserve data when possible (#146)

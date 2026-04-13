@@ -457,15 +457,25 @@ function ensureResponseToolCallState(state, outputIndex) {
   if (!state.responseToolCallOrder) {
     state.responseToolCallOrder = [];
   }
+  if (typeof state.toolCallIndex !== "number") {
+    state.toolCallIndex = state.responseToolCallOrder.length;
+  }
 
   const numericIndex = Number(outputIndex);
   if (!state.responseToolCalls.has(numericIndex)) {
     state.responseToolCalls.set(numericIndex, {
       outputIndex: numericIndex,
-      callId: null,
+      callId:
+        numericIndex === 0 && typeof state.currentToolCallId === "string"
+          ? state.currentToolCallId
+          : null,
       name: "",
-      argsBuffer: "",
+      argsBuffer:
+        numericIndex === 0 && typeof state.currentToolCallArgsBuffer === "string"
+          ? state.currentToolCallArgsBuffer
+          : "",
       deferred: false,
+      completed: false,
     });
   }
   if (!state.responseToolCallOrder.includes(numericIndex)) {
@@ -542,7 +552,10 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
 
   if (eventType === "response.output_item.added" && data.item?.type === "function_call") {
     const item = data.item;
-    const outputIndex = getResponseToolCallOutputIndex(data, state.responseToolCallOrder.length);
+    const outputIndex = getResponseToolCallOutputIndex(
+      data,
+      state.responseToolCallOrder?.length || 0
+    );
     const toolState = ensureResponseToolCallState(state, outputIndex);
     toolState.callId = item.call_id || toolState.callId || `call_${Date.now()}`;
     toolState.name = normalizeToolName(item.name) || toolState.name;
@@ -619,19 +632,22 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
     toolState.callId = item.call_id || toolState.callId || `call_${Date.now()}`;
     toolState.name = normalizeToolName(item.name) || toolState.name;
 
+    const argsFromItem =
+      item.arguments != null
+        ? typeof item.arguments === "string"
+          ? item.arguments
+          : JSON.stringify(item.arguments)
+        : "";
+
     if (toolState.deferred) {
       toolState.deferred = false;
       if (!toolState.name) {
         return null;
       }
 
-      const argsStr =
-        item.arguments != null
-          ? typeof item.arguments === "string"
-            ? item.arguments
-            : JSON.stringify(item.arguments)
-          : toolState.argsBuffer;
-      toolState.argsBuffer = argsStr || toolState.argsBuffer;
+      toolState.argsBuffer = argsFromItem || toolState.argsBuffer;
+      toolState.completed = true;
+      state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
 
       return {
         id: state.chatId,
@@ -660,34 +676,44 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       };
     }
 
-    if (item.arguments != null && !toolState.argsBuffer) {
-      const argsStr =
-        typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments);
-      toolState.argsBuffer = argsStr || toolState.argsBuffer;
-      if (argsStr) {
-        return {
-          id: state.chatId,
-          object: "chat.completion.chunk",
-          created: state.created,
-          model: state.model || "gpt-4",
-          choices: [
-            {
-              index: 0,
-              delta: {
-                tool_calls: [
-                  {
-                    index: outputIndex,
-                    function: { arguments: argsStr },
-                  },
-                ],
-              },
-              finish_reason: null,
-            },
-          ],
-        };
-      }
+    if (toolState.completed) {
+      return null;
     }
 
+    if (argsFromItem) {
+      if (toolState.argsBuffer === argsFromItem) {
+        toolState.completed = true;
+        state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
+        return null;
+      }
+
+      toolState.argsBuffer = argsFromItem || toolState.argsBuffer;
+      toolState.completed = true;
+      state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
+      return {
+        id: state.chatId,
+        object: "chat.completion.chunk",
+        created: state.created,
+        model: state.model || "gpt-4",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: outputIndex,
+                  function: { arguments: argsFromItem },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      };
+    }
+
+    toolState.completed = true;
+    state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
     return null;
   }
 

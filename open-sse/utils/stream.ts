@@ -738,6 +738,7 @@ export function createSSEStream(options: StreamOptions = {}) {
             reqLogger?.appendProviderChunk?.(remaining);
             sseParser.feed(remaining);
           }
+          sseParser.feed("\n\n");
 
           if (mode === STREAM_MODE.PASSTHROUGH) {
             for (const eventChunk of pendingSSEEvents.splice(0)) {

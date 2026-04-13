@@ -338,7 +338,7 @@ export class BaseExecutor {
         const response = await pRetry(
           async () => {
             const candidate = await fetch(url, fetchOptions);
-            if (candidate.status === HTTP_STATUS.RATE_LIMITED) {
+            if (candidate.status === HTTP_STATUS.RATE_LIMITED && !(this.provider === "codex")) {
               throw new RetryableStatusError(
                 candidate.status,
                 `HTTP ${candidate.status} returned by ${url}`
