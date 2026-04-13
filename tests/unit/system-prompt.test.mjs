@@ -128,6 +128,20 @@ test("injectSystemPrompt: prepends to existing responses instructions", () => {
   assert.equal(result.instructions, "GLOBAL:\n\nExisting instruction");
 });
 
+test("injectSystemPrompt: does not double inject into existing string content", () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+  const body = {
+    messages: [
+      { role: "system", content: "GLOBAL:\n\nOriginal prompt" },
+      { role: "user", content: "hi" },
+    ],
+  };
+
+  const result = injectSystemPrompt(body);
+
+  assert.equal(result.messages[0].content, "GLOBAL:\n\nOriginal prompt");
+});
+
 test("injectSystemPrompt: does not double inject when system and messages coexist", () => {
   setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
   const body = {

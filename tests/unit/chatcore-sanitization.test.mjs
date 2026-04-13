@@ -8,6 +8,7 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-chatcore-
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { handleChatCore } = await import("../../open-sse/handlers/chatCore.ts");
+const { setSystemPromptConfig } = await import("../../open-sse/services/systemPrompt.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const { createMemory, listMemories } = await import("../../src/lib/memory/store.ts");
 const { invalidateMemorySettingsCache } = await import("../../src/lib/memory/settings.ts");
@@ -140,6 +141,10 @@ async function invokeChatCore({
   }
 }
 
+test.afterEach(() => {
+  setSystemPromptConfig({ enabled: false, prompt: "" });
+});
+
 test.after(() => {
   try {
     const db = core.getDbInstance();
@@ -147,6 +152,21 @@ test.after(() => {
   } catch {}
 
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+});
+
+test("chatCore injects the global system prompt for direct handler calls", async () => {
+  setSystemPromptConfig({ enabled: true, prompt: "GLOBAL:" });
+
+  const { call } = await invokeChatCore({
+    body: {
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: "hello" }],
+    },
+  });
+
+  assert.equal(call.body.messages[0].role, "system");
+  assert.equal(call.body.messages[0].content, "GLOBAL:");
+  assert.equal(call.body.messages[1].content, "hello");
 });
 
 test("chatCore sanitization normalizes max_output_tokens into max_tokens", async () => {

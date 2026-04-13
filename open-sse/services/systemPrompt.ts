@@ -34,12 +34,44 @@ export function getSystemPromptConfig() {
 }
 
 /**
+ * Check whether a string value already starts with the given text (exact match).
+ * Used to prevent double-injection of the global system prompt.
+ *
+ * @param {string} value
+ * @param {string} text
+ * @returns {boolean}
+ */
+function alreadyStartsWith(value, text) {
+  return value === text || value.startsWith(text + "\n");
+}
+
+/**
  * @param {string} value
  * @param {string} text
  * @returns {string}
  */
 function prependToString(value, text) {
+  if (alreadyStartsWith(value, text)) return value;
   return value ? `${text}\n\n${value}` : text;
+}
+
+/**
+ * Check whether structured content already begins with the given text,
+ * indicating a prior injection of the same global prompt.
+ *
+ * @param {unknown} content
+ * @param {string} text
+ * @returns {boolean}
+ */
+function structuredContentAlreadyStartsWith(content, text) {
+  if (typeof content === "string") return alreadyStartsWith(content, text);
+  if (Array.isArray(content) && content.length > 0) {
+    const first = content[0];
+    if (first && typeof first === "object" && first.type === "text" && first.text === text) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -48,6 +80,8 @@ function prependToString(value, text) {
  * @returns {unknown}
  */
 function prependToStructuredContent(content, text) {
+  if (structuredContentAlreadyStartsWith(content, text)) return content;
+
   if (typeof content === "string" || content == null) {
     return prependToString(content || "", text);
   }
@@ -91,6 +125,12 @@ function injectIntoSystem(system, text) {
   }
 
   if (Array.isArray(system)) {
+    if (system.length > 0) {
+      const first = system[0];
+      if (first && typeof first === "object" && first.type === "text" && first.text === text) {
+        return system;
+      }
+    }
     return [{ type: "text", text }, ...system];
   }
 
@@ -126,6 +166,7 @@ export function injectSystemPrompt(body, promptText = null) {
   }
 
   if (typeof result.instructions === "string") {
+    if (alreadyStartsWith(result.instructions, text)) return result;
     result.instructions = prependToString(result.instructions, text);
     return result;
   }
@@ -136,12 +177,15 @@ export function injectSystemPrompt(body, promptText = null) {
   }
 
   if (Array.isArray(result.input)) {
+    if (result.instructions === text) return result;
     result.instructions = text;
     return result;
   }
 
   if (result.instructions !== undefined) {
-    result.instructions = prependToString(String(result.instructions || ""), text);
+    const instrStr = String(result.instructions || "");
+    if (alreadyStartsWith(instrStr, text)) return result;
+    result.instructions = prependToString(instrStr, text);
   }
 
   return result;

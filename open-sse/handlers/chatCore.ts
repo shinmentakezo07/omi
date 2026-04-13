@@ -123,6 +123,7 @@ import {
 } from "@/lib/memory/settings";
 import { injectSkills } from "@/lib/skills/injection";
 import { handleToolCallExecution } from "@/lib/skills/interception";
+import { injectSystemPrompt } from "../services/systemPrompt.ts";
 import {
   buildClaudeCodeCompatibleRequest,
   isClaudeCodeCompatibleProvider,
@@ -481,6 +482,7 @@ export async function handleChatCore({
   disableEmergencyFallback = false,
 }) {
   let { provider, model, extendedContext } = modelInfo;
+  body = injectSystemPrompt(body);
   const requestedModel =
     typeof body?.model === "string" && body.model.trim().length > 0 ? body.model : model;
   const startTime = Date.now();
