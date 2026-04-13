@@ -14,6 +14,7 @@ import { env, envNumber } from "@/env";
 
 const DEFAULT_MAX_ENTRIES = 50;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_TTL = 300000;
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
