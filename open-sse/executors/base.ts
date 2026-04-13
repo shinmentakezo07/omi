@@ -218,11 +218,11 @@ export class BaseExecutor {
     if (credentials.accessToken) {
       headers["Authorization"] = `Bearer ${credentials.accessToken}`;
     } else if (credentials.apiKey) {
-      // T07: rotate between primary + extra API keys when extraApiKeys is configured
       const extraKeys =
         (credentials.providerSpecificData?.extraApiKeys as string[] | undefined) ?? [];
+      const roundRobinEnabled = credentials.providerSpecificData?.roundRobinEnabled !== false;
       const effectiveKey =
-        extraKeys.length > 0 && credentials.connectionId
+        extraKeys.length > 0 && credentials.connectionId && roundRobinEnabled
           ? getRotatingApiKey(credentials.connectionId, credentials.apiKey, extraKeys)
           : credentials.apiKey;
       headers["Authorization"] = `Bearer ${effectiveKey}`;

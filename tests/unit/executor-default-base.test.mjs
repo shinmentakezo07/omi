@@ -214,7 +214,7 @@ test("DefaultExecutor.buildHeaders strips DashScope headers for Qwen API keys an
   assert.equal(oauthHeaders["X-Dashscope-CacheControl"], "enable");
 });
 
-test("DefaultExecutor.buildHeaders rotates extra API keys and builds Claude Code compatible headers", () => {
+test("DefaultExecutor.buildHeaders rotates extra API keys only when round-robin is enabled", () => {
   const openai = new DefaultExecutor("openai");
   const cc = new DefaultExecutor("anthropic-compatible-cc-test");
 
@@ -234,6 +234,14 @@ test("DefaultExecutor.buildHeaders rotates extra API keys and builds Claude Code
     },
     false
   );
+  const disabled = openai.buildHeaders(
+    {
+      apiKey: "primary",
+      connectionId: "conn-no-rotation",
+      providerSpecificData: { extraApiKeys: ["extra-1", "extra-2"], roundRobinEnabled: false },
+    },
+    false
+  );
   const ccHeaders = cc.buildHeaders(
     {
       apiKey: "cc-key",
@@ -244,6 +252,7 @@ test("DefaultExecutor.buildHeaders rotates extra API keys and builds Claude Code
 
   assert.equal(first.Authorization, "Bearer primary");
   assert.equal(second.Authorization, "Bearer extra-1");
+  assert.equal(disabled.Authorization, "Bearer primary");
   assert.equal(ccHeaders["x-api-key"], "cc-key");
   assert.equal(ccHeaders["anthropic-version"], CLAUDE_CODE_COMPATIBLE_ANTHROPIC_VERSION);
   assert.equal(ccHeaders["X-Claude-Code-Session-Id"], "session-1");

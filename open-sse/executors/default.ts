@@ -64,11 +64,11 @@ export class DefaultExecutor extends BaseExecutor {
   buildHeaders(credentials, stream = true) {
     const headers = { "Content-Type": "application/json", ...this.config.headers };
 
-    // T07: resolve extra keys round-robin locally since DefaultExecutor overrides BaseExecutor buildHeaders
     const extraKeys =
       (credentials.providerSpecificData?.extraApiKeys as string[] | undefined) ?? [];
+    const roundRobinEnabled = credentials.providerSpecificData?.roundRobinEnabled !== false;
     const effectiveKey =
-      extraKeys.length > 0 && credentials.connectionId && credentials.apiKey
+      extraKeys.length > 0 && credentials.connectionId && credentials.apiKey && roundRobinEnabled
         ? getRotatingApiKey(credentials.connectionId, credentials.apiKey, extraKeys)
         : credentials.apiKey;
 

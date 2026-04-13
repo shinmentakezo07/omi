@@ -2,7 +2,7 @@
  * apiKeyRotator.ts — T07: API Key Round-Robin
  *
  * Rotates between a primary API key and extra API keys stored in
- * providerSpecificData.extraApiKeys[]. Uses round-robin by default.
+ * providerSpecificData.extraApiKeys[]. Uses round-robin when enabled on the connection.
  *
  * Extra keys are stored as plain strings in providerSpecificData.extraApiKeys.
  * Example: { extraApiKeys: ["sk-abc...", "sk-def...", "sk-ghi..."] }

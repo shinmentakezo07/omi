@@ -4555,6 +4555,7 @@ function AddApiKeyModal({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [extraApiKeys, setExtraApiKeys] = useState<string[]>([]);
   const [newExtraKey, setNewExtraKey] = useState("");
+  const [roundRobinEnabled, setRoundRobinEnabled] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleValidate = async () => {
@@ -4625,11 +4626,10 @@ function AddApiKeyModal({
       }
 
       const providerSpecificData: Record<string, unknown> = {};
-      const trimmedExtraApiKeys = extraApiKeys
-        .map((key) => key.trim())
-        .filter((key) => key.length > 0 && key !== formData.apiKey.trim());
+      const trimmedExtraApiKeys = normalizeExtraApiKeys(extraApiKeys, formData.apiKey);
       if (trimmedExtraApiKeys.length > 0) {
         providerSpecificData.extraApiKeys = trimmedExtraApiKeys;
+        providerSpecificData.roundRobinEnabled = roundRobinEnabled;
       }
       if (formData.customUserAgent.trim()) {
         providerSpecificData.customUserAgent = formData.customUserAgent.trim();
@@ -4759,12 +4759,7 @@ function AddApiKeyModal({
         )}
         {isCompatible && !isAnthropic && !isCcCompatible && (
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium text-text-main">
-              Extra API Keys
-              <span className="ml-2 text-[11px] font-normal text-text-muted">
-                (round-robin rotation — optional)
-              </span>
-            </label>
+            <label className="text-sm font-medium text-text-main">Extra API Keys</label>
             {extraApiKeys.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 {extraApiKeys.map((key, idx) => (
@@ -4798,7 +4793,9 @@ function AddApiKeyModal({
                   onClick={() => {
                     const trimmed = newExtraKey.trim();
                     if (!trimmed || trimmed === formData.apiKey.trim()) return;
-                    setExtraApiKeys([...extraApiKeys, trimmed]);
+                    setExtraApiKeys(
+                      normalizeExtraApiKeys([...extraApiKeys, trimmed], formData.apiKey)
+                    );
                     setNewExtraKey("");
                   }}
                   disabled={!newExtraKey.trim()}
@@ -4807,8 +4804,21 @@ function AddApiKeyModal({
                 </Button>
               </div>
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-sidebar/30 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-text-main">Round-robin</p>
+                <p className="text-xs text-text-muted">
+                  Rotate across the primary key and extra keys for this provider.
+                </p>
+              </div>
+              <Toggle
+                checked={roundRobinEnabled}
+                onChange={setRoundRobinEnabled}
+                disabled={extraApiKeys.length === 0}
+              />
+            </div>
             <p className="text-xs text-text-muted">
-              Extra keys are stored on this connection and rotated together with the primary key.
+              Add one or more extra keys for this connection. Duplicate keys are ignored.
             </p>
           </div>
         )}
@@ -4902,6 +4912,20 @@ function normalizeAndValidateHttpBaseUrl(rawValue, fallbackUrl) {
   }
 }
 
+function normalizeExtraApiKeys(keys, primaryKey = "") {
+  const trimmedPrimaryKey = primaryKey.trim();
+  const seen = new Set<string>();
+
+  return keys.filter((key) => {
+    const trimmedKey = typeof key === "string" ? key.trim() : "";
+    if (!trimmedKey || trimmedKey === trimmedPrimaryKey || seen.has(trimmedKey)) {
+      return false;
+    }
+    seen.add(trimmedKey);
+    return true;
+  });
+}
+
 function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnectionModalProps) {
   const t = useTranslations("providers");
   const [formData, setFormData] = useState({
@@ -4924,6 +4948,7 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
   const [saveError, setSaveError] = useState<string | null>(null);
   const [extraApiKeys, setExtraApiKeys] = useState<string[]>([]);
   const [newExtraKey, setNewExtraKey] = useState("");
+  const [roundRobinEnabled, setRoundRobinEnabled] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const isBailian = connection?.provider === "bailian-coding-plan";
@@ -4955,7 +4980,8 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
       });
       // Load existing extra keys from providerSpecificData
       const existing = connection.providerSpecificData?.extraApiKeys;
-      setExtraApiKeys(Array.isArray(existing) ? existing : []);
+      setExtraApiKeys(Array.isArray(existing) ? normalizeExtraApiKeys(existing) : []);
+      setRoundRobinEnabled(connection.providerSpecificData?.roundRobinEnabled !== false);
       setNewExtraKey("");
       setShowAdvanced(!!existingCustomUserAgent);
       setTestResult(null);
@@ -5075,9 +5101,11 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
       }
       // Persist extra API keys and baseUrl in providerSpecificData
       if (!isOAuth) {
+        const normalizedExtraApiKeys = normalizeExtraApiKeys(extraApiKeys, formData.apiKey);
         updates.providerSpecificData = {
           ...(connection.providerSpecificData || {}),
-          extraApiKeys: extraApiKeys.filter((k) => k.trim().length > 0),
+          extraApiKeys: normalizedExtraApiKeys,
+          roundRobinEnabled: normalizedExtraApiKeys.length > 0 ? roundRobinEnabled : false,
           tag: formData.tag.trim() || undefined,
           customUserAgent: formData.customUserAgent.trim(),
         };
@@ -5277,7 +5305,7 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
             <label className="text-sm font-medium text-text-main">
               Extra API Keys
               <span className="ml-2 text-[11px] font-normal text-text-muted">
-                (round-robin rotation — optional)
+                (multiple keys per provider)
               </span>
             </label>
             {extraApiKeys.length > 0 && (
@@ -5307,7 +5335,9 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
                 className="flex-1 text-sm bg-sidebar/50 border border-border rounded px-3 py-2 text-text-main placeholder:text-text-muted focus:ring-1 focus:ring-primary outline-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && newExtraKey.trim()) {
-                    setExtraApiKeys([...extraApiKeys, newExtraKey.trim()]);
+                    setExtraApiKeys(
+                      normalizeExtraApiKeys([...extraApiKeys, newExtraKey.trim()], formData.apiKey)
+                    );
                     setNewExtraKey("");
                   }
                 }}
@@ -5315,7 +5345,9 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
               <button
                 onClick={() => {
                   if (newExtraKey.trim()) {
-                    setExtraApiKeys([...extraApiKeys, newExtraKey.trim()]);
+                    setExtraApiKeys(
+                      normalizeExtraApiKeys([...extraApiKeys, newExtraKey.trim()], formData.apiKey)
+                    );
                     setNewExtraKey("");
                   }
                 }}
@@ -5325,9 +5357,25 @@ function EditConnectionModal({ isOpen, connection, onSave, onClose }: EditConnec
                 Add
               </button>
             </div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-sidebar/30 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-text-main">Round-robin</p>
+                <p className="text-[11px] text-text-muted">
+                  Enable or disable rotation for this provider connection.
+                </p>
+              </div>
+              <Toggle
+                checked={roundRobinEnabled}
+                onChange={setRoundRobinEnabled}
+                disabled={extraApiKeys.length === 0}
+              />
+            </div>
             {extraApiKeys.length > 0 && (
               <p className="text-[11px] text-text-muted">
-                {extraApiKeys.length + 1} keys total — rotating round-robin on each request.
+                {extraApiKeys.length + 1} keys total —{" "}
+                {roundRobinEnabled
+                  ? "rotating round-robin on each request."
+                  : "using the primary key only."}
               </p>
             )}
           </div>

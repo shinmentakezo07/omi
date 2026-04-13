@@ -378,6 +378,8 @@ test.describe("Providers management", () => {
     await addDialog.getByRole("button", { name: /^add$/i }).nth(1).click();
     await addDialog.getByLabel(/add extra key/i).fill("sk-demo-extra-2");
     await addDialog.getByRole("button", { name: /^add$/i }).nth(1).click();
+    await expect(addDialog.getByText(/round-robin/i)).toBeVisible();
+    await addDialog.getByRole("switch", { name: /toggle/i }).click();
     await addDialog.getByRole("button", { name: /^save$/i }).click();
 
     await expect.poll(async () => (await readProviderMockState(page)).connections.length).toBe(1);
@@ -388,5 +390,12 @@ test.describe("Providers management", () => {
             ?.extraApiKeys as string[] | undefined) ?? []
       )
       .toEqual(["sk-demo-extra-1", "sk-demo-extra-2"]);
+    await expect
+      .poll(
+        async () =>
+          (await readProviderMockState(page)).connections[0]?.providerSpecificData
+            ?.roundRobinEnabled as boolean | undefined
+      )
+      .toBe(false);
   });
 });
