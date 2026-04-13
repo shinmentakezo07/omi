@@ -43,7 +43,14 @@ export function extractUsageFromResponse(responseBody, provider) {
       prompt_tokens: promptTokens,
       completion_tokens: responseBody.usage.output_tokens || 0,
       cache_read_input_tokens: cacheRead,
+      cached_tokens:
+        responseBody.usage.cached_tokens ??
+        responseBody.usage.input_tokens_details?.cached_tokens ??
+        cacheRead,
       cache_creation_input_tokens: cacheCreation,
+      reasoning_tokens:
+        responseBody.usage.reasoning_tokens ??
+        responseBody.usage.output_tokens_details?.reasoning_tokens,
     };
   }
 

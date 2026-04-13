@@ -77,13 +77,17 @@ test("sanitizeOpenAIResponse preserves native reasoning_content over extracted t
   assert.equal(sanitized.choices[0].message.reasoning_content, "provider reasoning");
 });
 
-test("sanitizeOpenAIResponse maps Claude-style usage fields and strips extras", () => {
+test("sanitizeOpenAIResponse maps Claude-style usage fields and preserves cache/reasoning details", () => {
   const sanitized = sanitizeOpenAIResponse({
     model: "claude-3-7-sonnet",
     choices: [],
     usage: {
       input_tokens: 11,
       output_tokens: 7,
+      cache_read_input_tokens: 4,
+      cache_creation_input_tokens: 2,
+      cached_tokens: 4,
+      reasoning_tokens: 3,
       service_tier: "ignored",
       usage_breakdown: { ignored: true },
     },
@@ -93,6 +97,10 @@ test("sanitizeOpenAIResponse maps Claude-style usage fields and strips extras", 
     prompt_tokens: 11,
     completion_tokens: 7,
     total_tokens: 18,
+    cache_read_input_tokens: 4,
+    cache_creation_input_tokens: 2,
+    cached_tokens: 4,
+    reasoning_tokens: 3,
   });
 });
 
@@ -136,7 +144,15 @@ test("sanitizeStreamingChunk keeps only safe chunk fields and maps reasoning ali
         logprobs: { mock: true },
       },
     ],
-    usage: { input_tokens: 2, output_tokens: 1, secret: true },
+    usage: {
+      input_tokens: 2,
+      output_tokens: 1,
+      cache_read_input_tokens: 5,
+      cache_creation_input_tokens: 1,
+      cached_tokens: 5,
+      reasoning_tokens: 2,
+      secret: true,
+    },
     system_fingerprint: "fp_123",
     provider_debug: "drop-me",
   });
@@ -163,6 +179,10 @@ test("sanitizeStreamingChunk keeps only safe chunk fields and maps reasoning ali
       prompt_tokens: 2,
       completion_tokens: 1,
       total_tokens: 3,
+      cache_read_input_tokens: 5,
+      cache_creation_input_tokens: 1,
+      cached_tokens: 5,
+      reasoning_tokens: 2,
     },
     system_fingerprint: "fp_123",
   });

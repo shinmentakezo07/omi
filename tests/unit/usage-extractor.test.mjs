@@ -98,6 +98,7 @@ test("extractUsageFromResponse totals Claude prompt tokens with cache read and c
         output_tokens: 7,
         cache_read_input_tokens: 4,
         cache_creation_input_tokens: 6,
+        output_tokens_details: { reasoning_tokens: 2 },
       },
     },
     "claude"
@@ -107,7 +108,9 @@ test("extractUsageFromResponse totals Claude prompt tokens with cache read and c
     prompt_tokens: 20,
     completion_tokens: 7,
     cache_read_input_tokens: 4,
+    cached_tokens: 4,
     cache_creation_input_tokens: 6,
+    reasoning_tokens: 2,
   });
 });
 

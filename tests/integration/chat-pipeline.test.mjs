@@ -518,7 +518,12 @@ test("chat pipeline injects the global system prompt into responses instructions
   );
 
   assert.equal(response.status, 200);
-  assert.equal(fetchCalls[0].body.instructions, "GLOBAL INSTRUCTION\n\nExisting response instruction");
+  assert.equal(fetchCalls[0].body.messages[0].role, "system");
+  assert.equal(
+    fetchCalls[0].body.messages[0].content,
+    "GLOBAL INSTRUCTION\n\nExisting response instruction"
+  );
+  assert.equal(fetchCalls[0].body.messages[1].content, "Hello OpenAI responses");
 });
 
 test("chat pipeline creates responses instructions when only input exists", async () => {
@@ -545,8 +550,9 @@ test("chat pipeline creates responses instructions when only input exists", asyn
   );
 
   assert.equal(response.status, 200);
-  assert.equal(fetchCalls[0].body.instructions, "GLOBAL INSTRUCTION");
-  assert.deepEqual(fetchCalls[0].body.input, [{ role: "user", content: "Hello OpenAI responses" }]);
+  assert.equal(fetchCalls[0].body.messages[0].role, "system");
+  assert.equal(fetchCalls[0].body.messages[0].content, "GLOBAL INSTRUCTION");
+  assert.equal(fetchCalls[0].body.messages[1].content, "Hello OpenAI responses");
 });
 
 test("chat pipeline avoids double injection when system and messages coexist", async () => {
@@ -576,8 +582,16 @@ test("chat pipeline avoids double injection when system and messages coexist", a
   );
 
   assert.equal(response.status, 200);
-  assert.equal(fetchCalls[0].body.system, "GLOBAL INSTRUCTION\n\nClaude native system");
-  assert.equal(fetchCalls[0].body.messages[0].content, "Existing message system");
+  assert.deepEqual(fetchCalls[0].body.system, [
+    { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+    {
+      type: "text",
+      text: "GLOBAL INSTRUCTION\n\nClaude native system\nExisting message system",
+      cache_control: { type: "ephemeral", ttl: "1h" },
+    },
+  ]);
+  assert.equal(fetchCalls[0].body.messages[0].role, "user");
+  assert.equal(fetchCalls[0].body.messages[0].content[0].text, "Hello Claude");
 });
 
 test("chat pipeline preserves structured system message content", async () => {
@@ -618,7 +632,6 @@ test("chat pipeline preserves structured system message content", async () => {
     text: "Existing instruction",
   });
 });
-
 
 test("chat pipeline translates OpenAI requests to Claude and returns OpenAI-shaped responses", async () => {
   await seedConnection("claude", { apiKey: "sk-claude-primary" });

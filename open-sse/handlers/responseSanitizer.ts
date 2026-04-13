@@ -15,6 +15,10 @@ const ALLOWED_USAGE_FIELDS = new Set([
   "total_tokens",
   "prompt_tokens_details",
   "completion_tokens_details",
+  "cached_tokens",
+  "reasoning_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
 ]);
 
 type JsonRecord = Record<string, unknown>;

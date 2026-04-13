@@ -1,54 +1,74 @@
-# OmniRoute Agent Guidelines
+# Repository Guidelines
 
-## Project Overview
+## Project Structure & Module Organization
+- `src/` contains the Next.js 16 app, API routes, shared utilities, and database modules under `src/lib/db/`.
+- `open-sse/` holds the request pipeline, provider executors, translators, and MCP server code.
+- `electron/` contains the desktop app, `bin/` ships CLI entrypoints, and `tests/` stores unit, integration, e2e, and protocol coverage.
+- Keep changes surgical: touch only files directly related to the task and follow existing folder patterns.
 
-Unified AI proxy/router — 60+ providers, MCP Server (25 tools), A2A v0.3 Protocol, Electron desktop app.
+## Build, Test, and Development Commands
+- `npm run dev` starts the web app locally.
+- `npm run build` creates the production Next.js build.
+- `npm run lint` runs ESLint across the repo.
+- `npm run typecheck:core` checks the main TypeScript surfaces.
+- `npm run test:unit`, `npm run test:vitest`, and `npm run test:e2e` cover unit, Vitest, and Playwright flows.
+- For a targeted unit test, use `node --import tsx/esm --test tests/unit/<file>.test.mjs`.
 
-**Stack**: Next.js 16 (App Router), TypeScript 5.9, Node.js ≥18 &lt;24, ES Modules, better-sqlite3, Tailwind CSS v4, Zod v4, next-intl (30 languages).
+## Coding Style & Naming Conventions
+- Use Prettier defaults configured in the repo: 2 spaces, semicolons, double quotes, 100 character width, trailing commas where supported.
+- Match the existing architecture and avoid speculative abstractions.
+- Use PascalCase for React components, UPPER_SNAKE for constants, and camelCase or kebab-case for file names depending on nearby files.
+- Validate external input with Zod and route database access through `src/lib/db/` modules instead of inline SQL.
 
-## Key Commands
+## Behavioral Guidelines for LLM Contributors
+Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on common pitfalls.
 
-| Command | Description |
-| --- | --- |
-| `npm run dev` | Dev server (auto-runs postinstall) |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
-| `npm run typecheck:core` | TypeScript (core files only) |
-| `npm run test:unit` | Unit tests (Node.js test runner) |
-| `npm run test:vitest` | Vitest (MCP, autoCombo) |
-| `npm run test:e2e` | Playwright E2E |
-| `npm run test:protocols:e2e` | MCP + A2A client flows |
-| `npm run test:coverage` | Coverage gate (60% min) |
-| `npm run electron:dev` | Electron dev mode |
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-## Project Structure
+### 1. Think Before Coding
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+- State assumptions explicitly before implementing.
+- If multiple interpretations exist, present them instead of picking silently.
+- Call out simpler approaches or push back when the requested path is overcomplicated.
+- If something is unclear, stop, name the confusion, and ask.
 
-- `src/` — Next.js app, API routes, DB modules (`src/lib/db/`), domain layer
-- `open-sse/` — Request pipeline: handlers, executors, translators, services, MCP server
-- `electron/` — Desktop app
-- `bin/` — CLI tool
-- `tests/` — Unit, integration, e2e, protocol tests
+### 2. Simplicity First
+**Minimum code that solves the problem. Nothing speculative.**
+- Do not add features, abstractions, flexibility, or impossible-scenario handling that was not requested.
+- If a solution grows unnecessarily, rewrite it smaller.
+- Sanity check every change with: would a senior engineer consider this overcomplicated?
 
-## Coding Conventions
+### 3. Surgical Changes
+**Touch only what you must. Clean up only your own mess.**
+- Avoid refactoring unrelated code, comments, or formatting.
+- Match local style, even if you would design it differently.
+- Remove imports, variables, or functions made unused by your change, but leave pre-existing dead code alone unless asked.
+- Every changed line should trace directly to the request.
 
-- **Formatting**: Prettier (2 spaces, semicolons, double quotes, 100 char width, es5 trailing commas)
-- **TypeScript**: Target ES2022, module `esnext`, `strict: false`. Path aliases: `@/*` → `src/`, `@omniroute/open-sse` → `open-sse/`
-- **Naming**: Files = camelCase/kebab-case, React components = PascalCase, constants = UPPER_SNAKE
-- **Security**: `no-eval`, `no-implied-eval`, `no-new-func` enforced. Validate inputs with Zod.
+### 4. Goal-Driven Execution
+**Define success criteria. Loop until verified.**
+- Turn requests into verifiable goals such as reproducing a bug with a test before fixing it.
+- For multi-step work, state a short plan with verification for each step.
+- Prefer strong success criteria over vague goals like “make it work.”
 
-## Testing & Coverage
+Example plan format:
+```text
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
 
-- 60% coverage gate (statements, lines, functions, branches)
-- PRs affecting `src/`, `open-sse/`, `electron/`, `bin/` require tests
-- Use `node --import tsx/esm --test tests/unit/<file>.test.mjs` to run single test file
+## Testing Guidelines
+- Add or update tests for changes under `src/`, `open-sse/`, `electron/`, or `bin/`.
+- Keep the 60% coverage gate in mind when adding or modifying behavior.
+- Prefer the smallest relevant test command while iterating, then run the full relevant validators before finishing.
 
-## Architecture Patterns
+## Commit & Pull Request Guidelines
+- Use Conventional Commit prefixes such as `fix:`, `feat:`, `refactor:`, or scoped forms like `fix(auth):`.
+- Before committing, review `git status`, inspect staged diffs for secrets, and confirm generated files are intentional.
+- Pull requests should clearly describe user-visible impact, list validation performed, and include screenshots for UI or Electron changes.
 
-- **DB ops**: Always use `src/lib/db/` modules, never raw SQL in routes
-- **Request flow**: `open-sse/handlers/chatCore.ts` → executor → upstream provider
-- **Add provider**: Register in `src/shared/constants/providers.ts` → add executor in `open-sse/executors/` → add translator if needed → add models in `open-sse/config/providerRegistry.ts`
-- **SSE streams**: Use abort signals for proper cleanup to avoid memory leaks
-
-## Commit Style
-
-Conventional commits: `fix:`, `feat:`, `chore:`, `refactor:`, `deps:`, `docs:`. Scoped: `fix(auth):`.
+## Security & Architecture Notes
+- Do not use `eval`, `new Function`, or similar dynamic execution patterns.
+- For provider work, register constants, executors, and model metadata in the existing provider registry flow.
+- Use abort signals for SSE or streaming work to avoid leaked resources.

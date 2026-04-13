@@ -121,6 +121,12 @@ export function openaiToClaudeRequest(model, body, stream) {
   // Messages
   const systemParts = [];
 
+  if (body.system !== undefined) {
+    systemParts.push(
+      typeof body.system === "string" ? body.system : normalizeContentToString(body.system)
+    );
+  }
+
   if (body.messages && Array.isArray(body.messages)) {
     // Extract system messages (T15: handle both string and array content)
     for (const msg of body.messages) {
