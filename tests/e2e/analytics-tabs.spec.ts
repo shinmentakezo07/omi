@@ -89,6 +89,31 @@ test.describe("Analytics Tabs UI", () => {
       });
     });
 
+    await page.route("**/api/v1/search/analytics", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 420,
+          today: 48,
+          cached: 173,
+          errors: 6,
+          totalCostUsd: 3.2145,
+          byProvider: {
+            brave: { count: 180, costUsd: 1.1023 },
+            tavily: { count: 140, costUsd: 1.0088 },
+            exa: { count: 100, costUsd: 1.1034 },
+          },
+          last24h: Array.from({ length: 24 }, (_, index) => ({
+            hour: new Date(Date.now() - (23 - index) * 3600000).toISOString(),
+            count: index + 3,
+          })),
+          cacheHitRate: 41,
+          avgDurationMs: 612,
+        }),
+      });
+    });
+
     await page.route("**/api/combos", async (route) => {
       await route.fulfill({
         status: 200,
@@ -134,6 +159,32 @@ test.describe("Analytics Tabs UI", () => {
         .first();
       await expect(tabButton).toBeVisible();
     }
+  });
+
+  test("Search tab shows KPI cards and Recharts panels", async ({ page }) => {
+    await page.goto("/dashboard/analytics");
+    await page.waitForLoadState("networkidle");
+
+    const redirectedToLogin = page.url().includes("/login");
+    test.skip(redirectedToLogin, "Authentication enabled without a login fixture.");
+
+    const searchTab = page
+      .locator("button")
+      .filter({
+        hasText: /search/i,
+      })
+      .first();
+
+    await expect(async () => {
+      await searchTab.click();
+      await expect(page.getByText(/Search requests over the last 24 hours/i)).toBeVisible({
+        timeout: 1000,
+      });
+    }).toPass({ timeout: 15000 });
+
+    await expect(page.getByText(/Search funnel health/i)).toBeVisible();
+    await expect(page.getByText(/Provider breakdown/i)).toBeVisible();
+    await expect(page.locator("svg.recharts-surface, .recharts-wrapper").first()).toBeVisible();
   });
 
   test("Provider Utilization tab shows TimeRangeSelector and chart", async ({ page }) => {
