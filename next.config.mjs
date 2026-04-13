@@ -45,6 +45,13 @@ const nextConfig = {
     unoptimized: true,
   },
   webpack: (config, { isServer, webpack }) => {
+    // Suppress "Critical dependency: the request of a dependency is an expression"
+    // warnings from @opentelemetry/instrumentation (nested in @fastify/otel and
+    // @prisma/instrumentation via @sentry/nextjs). Harmless — OTel dynamic
+    // requires are by design.
+    config.ignoreWarnings ??= [];
+    config.ignoreWarnings.push({ module: /@opentelemetry\/instrumentation/ });
+
     if (isServer) {
       // Webpack IgnorePlugin: skip thread-stream test files that contain
       // intentionally broken syntax/imports (they cause Turbopack build errors)
