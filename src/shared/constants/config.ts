@@ -53,5 +53,5 @@ export {
   AUTH_METHODS,
 } from "./providers";
 
-// Re-export from models.js for backward compatibility
-export { PROVIDER_MODELS, AI_MODELS } from "./models";
+// Model exports intentionally live in ./models only.
+// Re-exporting them here makes browser-safe config imports pull server-adjacent registry code.

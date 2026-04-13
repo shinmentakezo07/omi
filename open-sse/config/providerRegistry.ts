@@ -6,8 +6,9 @@
  * is auto-generated from this registry.
  */
 
-import { env } from "@/env";
-import { platform, arch } from "os";
+// Use process.env directly here because this registry is reachable from shared/browser-adjacent imports.
+// Importing the validated server-only env module leaks server env access into the client bundle.
+const readServerEnv = (key: string) => process.env[key];
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -104,7 +105,8 @@ const KIMI_CODING_SHARED = {
 } as const;
 
 function mapStainlessOs() {
-  switch (platform()) {
+  const currentPlatform = process.platform;
+  switch (currentPlatform) {
     case "darwin":
       return "MacOS";
     case "win32":
@@ -112,12 +114,13 @@ function mapStainlessOs() {
     case "linux":
       return "Linux";
     default:
-      return `Other::${platform()}`;
+      return `Other::${currentPlatform}`;
   }
 }
 
 function mapStainlessArch() {
-  switch (arch()) {
+  const currentArch = process.arch;
+  switch (currentArch) {
     case "x64":
       return "x64";
     case "arm64":
@@ -125,7 +128,7 @@ function mapStainlessArch() {
     case "ia32":
       return "x86";
     default:
-      return `other::${arch()}`;
+      return `other::${currentArch}`;
   }
 }
 
@@ -322,8 +325,8 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     oauth: {
       clientIdEnv: "QODER_OAUTH_CLIENT_ID",
       clientSecretEnv: "QODER_OAUTH_CLIENT_SECRET",
-      tokenUrl: env.QODER_OAUTH_TOKEN_URL || "",
-      authUrl: env.QODER_OAUTH_AUTHORIZE_URL || "",
+      tokenUrl: readServerEnv("QODER_OAUTH_TOKEN_URL") || "",
+      authUrl: readServerEnv("QODER_OAUTH_AUTHORIZE_URL") || "",
     },
     models: [
       { id: "qoder-rome-30ba3b", name: "Qoder ROME" },
@@ -362,7 +365,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     authType: "oauth",
     authHeader: "bearer",
     headers: {
-      "User-Agent": `antigravity/1.107.0 ${platform()}/${arch()}`,
+      "User-Agent": `antigravity/1.107.0 ${process.platform}/${process.arch}`,
     },
     oauth: {
       clientIdEnv: "ANTIGRAVITY_OAUTH_CLIENT_ID",
@@ -1456,10 +1459,11 @@ export function generateLegacyProviders(): Record<string, LegacyProvider> {
     // OAuth
     if (entry.oauth) {
       if (entry.oauth.clientIdEnv) {
-        p.clientId = env[entry.oauth.clientIdEnv] || entry.oauth.clientIdDefault;
+        p.clientId = readServerEnv(entry.oauth.clientIdEnv) || entry.oauth.clientIdDefault;
       }
       if (entry.oauth.clientSecretEnv) {
-        p.clientSecret = env[entry.oauth.clientSecretEnv] || entry.oauth.clientSecretDefault;
+        p.clientSecret =
+          readServerEnv(entry.oauth.clientSecretEnv) || entry.oauth.clientSecretDefault;
       }
       if (entry.oauth.tokenUrl) p.tokenUrl = entry.oauth.tokenUrl;
       if (entry.oauth.refreshUrl) p.refreshUrl = entry.oauth.refreshUrl;
@@ -1505,11 +1509,10 @@ export function generateAliasMap(): Record<string, string> {
 const LOCAL_HOSTNAMES = new Set([
   "localhost",
   "127.0.0.1",
-  ...(env.LOCAL_HOSTNAMES
-    ? env.LOCAL_HOSTNAMES.split(",")
-        .map((h) => h.trim())
-        .filter(Boolean)
-    : []),
+  ...(readServerEnv("LOCAL_HOSTNAMES") || "")
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean),
 ]);
 
 /**

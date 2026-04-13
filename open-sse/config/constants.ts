@@ -1,9 +1,8 @@
-import { env } from "@/env";
 import { getUpstreamTimeoutConfig } from "@/shared/utils/runtimeTimeouts";
 import { loadProviderCredentials } from "./credentialLoader.ts";
 import { generateLegacyProviders } from "./providerRegistry.ts";
 
-const upstreamTimeouts = getUpstreamTimeoutConfig(env, (message) => {
+const upstreamTimeouts = getUpstreamTimeoutConfig(process.env, (message) => {
   console.warn(`[open-sse] ${message}`);
 });
 
@@ -49,8 +48,8 @@ export const OAUTH_ENDPOINTS = {
     auth: "https://chat.qwen.ai/api/v1/oauth2/device/code", // From CLIProxyAPI
   },
   qoder: {
-    token: env.QODER_OAUTH_TOKEN_URL || "",
-    auth: env.QODER_OAUTH_AUTHORIZE_URL || "",
+    token: process.env.QODER_OAUTH_TOKEN_URL || "",
+    auth: process.env.QODER_OAUTH_AUTHORIZE_URL || "",
   },
   github: {
     token: "https://github.com/login/oauth/access_token",
