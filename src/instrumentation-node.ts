@@ -1,3 +1,39 @@
+import { env, envFlag } from "@/env";
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import * as Sentry from "@sentry/nextjs";
+import { collectDefaultMetrics } from "prom-client";
+
+let observabilityInitialized = false;
+
+function initializeObservability(): void {
+  if (observabilityInitialized) {
+    return;
+  }
+
+  if (envFlag(env.ENABLE_OTEL)) {
+    const sdk = new NodeSDK({
+      autoDetectResources: true,
+      instrumentations: [getNodeAutoInstrumentations()],
+    });
+    void sdk.start();
+  }
+
+  collectDefaultMetrics({
+    prefix: env.PROMETHEUS_PREFIX || "omniroute_",
+  });
+
+  if (envFlag(env.ENABLE_SENTRY) && env.SENTRY_DSN) {
+    Sentry.init({
+      dsn: env.SENTRY_DSN,
+      environment: env.SENTRY_ENVIRONMENT || process.env.NODE_ENV,
+      tracesSampleRate: 0,
+    });
+  }
+
+  observabilityInitialized = true;
+}
+
 /**
  * Node.js-only instrumentation logic.
  *
@@ -21,7 +57,7 @@ function toHex(bytes: Uint8Array): string {
 }
 
 function isBackgroundServicesDisabled(): boolean {
-  const raw = process.env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES;
+  const raw = env.OMNIROUTE_DISABLE_BACKGROUND_SERVICES;
   if (!raw) return false;
   return new Set(["1", "true", "yes", "on"]).has(raw.trim().toLowerCase());
 }
@@ -117,13 +153,13 @@ async function ensureSecrets(): Promise<void> {
 }
 
 export async function registerNodejs(): Promise<void> {
-  // Initialize proxy fetch patch FIRST (before any HTTP requests)
+  initializeObservability();
+
   await import("@omniroute/open-sse/index.ts");
   console.log("[STARTUP] Global fetch proxy patch initialized");
 
   await ensureSecrets();
 
-  // Trigger request-log layout migration during startup, before any request hits usageDb.
   await import("@/lib/usage/migrations");
 
   const { initConsoleInterceptor } = await import("@/lib/consoleInterceptor");

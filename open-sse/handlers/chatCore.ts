@@ -2232,7 +2232,7 @@ export async function handleChatCore({
         translatedResponse?.choices?.[0]?.message?.content || ""
       ).length;
       if (contentLength > 0) {
-        const estimated = estimateUsage(body, contentLength, clientResponseFormat);
+        const estimated = estimateUsage(body, contentLength, clientResponseFormat, model);
         translatedResponse.usage = filterUsageForFormat(estimated, clientResponseFormat);
       }
     }

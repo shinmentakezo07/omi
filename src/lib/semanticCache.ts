@@ -13,8 +13,13 @@
 import crypto from "crypto";
 import { LRUCache } from "./cacheLayer";
 import { getDbInstance } from "./db/core";
+import { env, envNumber } from "@/env";
 
 type JsonRecord = Record<string, unknown>;
+
+const DEFAULT_SEMANTIC_CACHE_TTL_MS = 1800000;
+const DEFAULT_SEMANTIC_CACHE_MAX_SIZE = 100;
+const DEFAULT_SEMANTIC_CACHE_MAX_BYTES = 4 * 1024 * 1024;
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -91,12 +96,16 @@ function getHeaderValue(
 
 let memoryCache: LRUCache | null = null;
 
+function getSemanticCacheTTL() {
+  return envNumber(env.SEMANTIC_CACHE_TTL_MS, DEFAULT_SEMANTIC_CACHE_TTL_MS);
+}
+
 function getMemoryCache() {
   if (!memoryCache) {
     memoryCache = new LRUCache({
-      maxSize: parseInt(process.env.SEMANTIC_CACHE_MAX_SIZE || "100", 10),
-      maxBytes: parseInt(process.env.SEMANTIC_CACHE_MAX_BYTES || String(4 * 1024 * 1024), 10),
-      defaultTTL: parseInt(process.env.SEMANTIC_CACHE_TTL_MS || "1800000", 10),
+      maxSize: envNumber(env.SEMANTIC_CACHE_MAX_SIZE, DEFAULT_SEMANTIC_CACHE_MAX_SIZE),
+      maxBytes: envNumber(env.SEMANTIC_CACHE_MAX_BYTES, DEFAULT_SEMANTIC_CACHE_MAX_BYTES),
+      defaultTTL: getSemanticCacheTTL(),
     });
     ensureCacheMetricsTable();
   }
@@ -198,10 +207,16 @@ export function getCachedResponse(signature) {
  * @param {string} model
  * @param {object} response - The API response to cache
  * @param {number} tokensSaved - Estimated tokens saved
- * @param {number} [ttlMs] - TTL in ms (default: 1 hour)
+ * @param {number} [ttlMs] - TTL in ms (default: env or 30 minutes)
  */
-export function setCachedResponse(signature, model, response, tokensSaved = 0, ttlMs = 3600000) {
-  const ttl = parseInt(process.env.SEMANTIC_CACHE_TTL_MS || String(ttlMs), 10);
+export function setCachedResponse(
+  signature,
+  model,
+  response,
+  tokensSaved = 0,
+  ttlMs = getSemanticCacheTTL()
+) {
+  const ttl = ttlMs;
 
   // 1. Memory cache
   getMemoryCache().set(signature, { response, tokensSaved }, ttl);
@@ -275,10 +290,118 @@ export function invalidateBySignature(signature: string): boolean {
 }
 
 /**
- * Invalidate entries older than a given age.
- * @param {number} maxAgeMs - Maximum age in milliseconds
- * @returns {number} Number of entries removed
+ * Invalidate all entries from both memory and SQLite caches.
+ * @returns {number} Number of SQLite entries removed
  */
+export function clearSemanticCache(): number {
+  getMemoryCache().clear();
+  try {
+    const db = getDbInstance();
+    const result = db.prepare("DELETE FROM semantic_cache").run();
+    return result.changes || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get cache statistics.
+ * @returns {object}
+ */
+export function getCacheStats() {
+  const memStats = getMemoryCache().getStats();
+  const hits = getMetricValue("hits");
+  const misses = getMetricValue("misses");
+  const tokensSaved = getMetricValue("tokens_saved");
+  const total = hits + misses;
+
+  return {
+    memory: memStats,
+    persistent: {
+      hits,
+      misses,
+      tokensSaved,
+      hitRate: total > 0 ? (hits / total) * 100 : 0,
+    },
+  };
+}
+
+/**
+ * Middleware hook for requests.
+ * If cache hit, returns Response immediately.
+ * If cache miss, returns null.
+ */
+export function tryServeFromCache(request, body) {
+  // Only cache non-streaming, temp=0 requests
+  if (body.stream === true) return null;
+  if ((body.temperature || 0) > 0) return null;
+
+  // Bypass header
+  const noCache = getHeaderValue(request?.headers, "x-omniroute-no-cache");
+  if (noCache === "true") return null;
+
+  const signature = generateSignature(body.model, body.messages, body.temperature, body.top_p);
+  const cached = getCachedResponse(signature);
+  if (!cached) return null;
+
+  return {
+    signature,
+    response: cached,
+  };
+}
+
+/**
+ * Middleware hook for responses.
+ * Stores successful response in cache if eligible.
+ */
+export function maybeCacheResponse(request, body, responseData) {
+  // Only cache non-streaming, temp=0 successful responses
+  if (body.stream === true) return;
+  if ((body.temperature || 0) > 0) return;
+  if (!responseData || responseData.error) return;
+
+  // Bypass header
+  const noCache = getHeaderValue(request?.headers, "x-omniroute-no-cache");
+  if (noCache === "true") return;
+
+  const signature = generateSignature(body.model, body.messages, body.temperature, body.top_p);
+
+  // Estimate tokens saved = prompt_tokens from usage (or 0 if unavailable)
+  const usage = asRecord(responseData.usage);
+  const tokensSaved = toNumber(usage.prompt_tokens, 0);
+
+  setCachedResponse(signature, body.model, responseData, tokensSaved);
+}
+
+// ─── Initialization ─────────────────
+
+// Background cleanup every 5 minutes
+let cleanupInterval;
+if (typeof process !== "undefined" && process.env.NODE_ENV !== "test") {
+  cleanupInterval = setInterval(
+    () => {
+      const removed = cleanExpiredEntries();
+      if (removed > 0) {
+        console.log(`[semanticCache] Cleaned ${removed} expired entries`);
+      }
+    },
+    5 * 60 * 1000
+  );
+
+  // Prevent timer from keeping Node.js alive (tests, CLI scripts)
+  if (typeof cleanupInterval.unref === "function") {
+    cleanupInterval.unref();
+  }
+}
+
+// Export for testing
+export function stopCleanup() {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = undefined;
+  }
+}
+
 export function invalidateStale(maxAgeMs: number): number {
   getMemoryCache().clear();
   try {
@@ -291,51 +414,6 @@ export function invalidateStale(maxAgeMs: number): number {
   }
 }
 
-// ── Auto-cleanup timer ──
-
-let _cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-/**
- * Start periodic auto-cleanup of expired entries.
- * @param {number} intervalMs - Cleanup interval (default: 5 minutes)
- */
-export function startAutoCleanup(intervalMs = 300_000): void {
-  stopAutoCleanup();
-  _cleanupTimer = setInterval(() => {
-    const removed = cleanExpiredEntries();
-    if (removed > 0) {
-      console.log(`[SemanticCache] Auto-cleaned ${removed} expired entries`);
-    }
-  }, intervalMs);
-  if (_cleanupTimer && typeof _cleanupTimer === "object" && "unref" in _cleanupTimer) {
-    (_cleanupTimer as { unref?: () => void }).unref?.();
-  }
-}
-
-/**
- * Stop periodic auto-cleanup.
- */
-export function stopAutoCleanup(): void {
-  if (_cleanupTimer) {
-    clearInterval(_cleanupTimer);
-    _cleanupTimer = null;
-  }
-}
-
-export function cleanOldMetrics(retentionDays = 90): number {
-  try {
-    const db = getDbInstance();
-    const cutoff = new Date(Date.now() - retentionDays * 86400000).toISOString();
-    const result = db.prepare("DELETE FROM semantic_cache WHERE created_at < ?").run(cutoff);
-    return result.changes || 0;
-  } catch {
-    return 0;
-  }
-}
-
-/**
- * Clear all cache entries.
- */
 export function clearCache() {
   getMemoryCache().clear();
   try {
@@ -347,38 +425,6 @@ export function clearCache() {
   }
 }
 
-export function getCacheStats() {
-  const memStats = getMemoryCache().getStats();
-  let dbSize = 0;
-  try {
-    const db = getDbInstance();
-    const row = db
-      .prepare("SELECT COUNT(*) as count FROM semantic_cache WHERE expires_at > datetime('now')")
-      .get();
-    dbSize = toNumber(asRecord(row).count, 0);
-  } catch {
-    // DB not available
-  }
-
-  const hits = getMetricValue("hits");
-  const misses = getMetricValue("misses");
-  const tokensSaved = getMetricValue("tokens_saved");
-  const total = hits + misses;
-
-  return {
-    memoryEntries: memStats.size,
-    dbEntries: dbSize,
-    hits,
-    misses,
-    hitRate: total > 0 ? ((hits / total) * 100).toFixed(1) : "0.0",
-    tokensSaved,
-  };
-}
-
-/**
- * Check if a request is cacheable.
- * Only non-streaming, deterministic (temperature=0) requests.
- */
 export function isCacheable(body, headers) {
   if ((getHeaderValue(headers, "x-omniroute-no-cache") || "").toLowerCase() === "true") {
     return false;

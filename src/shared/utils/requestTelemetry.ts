@@ -1,3 +1,5 @@
+import { requestCounter, requestDurationHistogram, telemetryPhaseHistogram } from "@/lib/metrics";
+
 /**
  * Request Telemetry — FASE-09 E2E Hardening (T-45)
  *
@@ -126,6 +128,14 @@ export function recordTelemetry(telemetry) {
   history.push(summary);
   while (history.length > MAX_HISTORY) {
     history.shift();
+  }
+
+  requestCounter.inc({ phase: "request" });
+  requestDurationHistogram.observe(summary.totalMs);
+  for (const phase of summary.phases) {
+    if (typeof phase.phase === "string" && typeof phase.durationMs === "number") {
+      telemetryPhaseHistogram.observe({ phase: phase.phase }, phase.durationMs);
+    }
   }
 }
 

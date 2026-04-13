@@ -1,3 +1,4 @@
+import { env } from "@/env";
 import fs from "node:fs";
 import path from "path";
 import os from "os";
@@ -40,8 +41,7 @@ export function getDefaultDataDir() {
     return path.join(appData, APP_NAME);
   }
 
-  // Support XDG on Linux/macOS when explicitly configured.
-  const xdgConfigHome = normalizeConfiguredPath(process.env.XDG_CONFIG_HOME);
+  const xdgConfigHome = normalizeConfiguredPath(env.XDG_CONFIG_HOME);
   if (xdgConfigHome) {
     return path.join(xdgConfigHome, APP_NAME);
   }
@@ -53,7 +53,7 @@ export function resolveDataDir({ isCloud = false }: { isCloud?: boolean } = {}):
   if (isCloud) return "/tmp";
 
   const candidates = [
-    normalizeConfiguredPath(process.env.DATA_DIR),
+    normalizeConfiguredPath(env.DATA_DIR),
     getDefaultDataDir(),
     path.join(os.tmpdir(), APP_NAME),
   ].filter((candidate): candidate is string => Boolean(candidate));

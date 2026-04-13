@@ -8,6 +8,7 @@
  * Can be toggled per provider connection via dashboard.
  */
 
+import { envNumber } from "@/env";
 import Bottleneck from "bottleneck";
 import { parseRetryAfterFromBody, lockModel } from "./accountFallback.ts";
 import { getProviderCategory } from "../config/providerRegistry.ts";
@@ -64,7 +65,7 @@ let initialized = false;
 // Max time (ms) a job can wait in queue before failing with a timeout error.
 // Prevents infinite queuing when all providers are exhausted after a 429.
 // Configurable via RATE_LIMIT_MAX_WAIT_MS env var (default: 2 minutes).
-const MAX_WAIT_MS = parseInt(process.env.RATE_LIMIT_MAX_WAIT_MS || "120000", 10);
+const MAX_WAIT_MS = envNumber(process.env.RATE_LIMIT_MAX_WAIT_MS, 120000);
 
 // Default conservative settings (before we learn from headers)
 const DEFAULT_SETTINGS = {

@@ -1,5 +1,8 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
+import { useEffect } from "react";
+
 /**
  * Server Error Page — P-1
  *
@@ -13,6 +16,15 @@ interface ErrorProps {
 }
 
 export default function Error({ error, reset }: ErrorProps) {
+  useEffect(() => {
+    Sentry.captureException(error, {
+      tags: {
+        boundary: "route-error",
+        digest: error.digest || "unknown",
+      },
+    });
+  }, [error]);
+
   return (
     <div
       className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center"

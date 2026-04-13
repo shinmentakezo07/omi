@@ -1,3 +1,4 @@
+import { createParser, type EventSourceMessage, type ParseError } from "eventsource-parser";
 import { translateResponse, initState } from "../translator/index.ts";
 import { FORMATS } from "../translator/formats.ts";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb";
@@ -81,6 +82,23 @@ type ToolCall = {
 
 type UsageTokenRecord = Record<string, number>;
 
+type ParsedSSEChunk = {
+  raw: string;
+  data: string;
+};
+
+function formatIncomingSSEEvent(message: EventSourceMessage) {
+  const dataLines = message.data.split("\n");
+  let raw = "";
+  if (message.id !== undefined) raw += `id: ${message.id}\n`;
+  if (message.event !== undefined) raw += `event: ${message.event}\n`;
+  for (const dataLine of dataLines) {
+    raw += `data: ${dataLine}\n`;
+  }
+  raw += "\n";
+  return raw;
+}
+
 function getOpenAIIntermediateChunks(value: unknown): unknown[] {
   if (!value || typeof value !== "object") return [];
   const candidate = (value as JsonRecord)._openaiIntermediate;
@@ -147,7 +165,6 @@ export function createSSEStream(options: StreamOptions = {}) {
     onComplete = null,
   } = options;
 
-  let buffer = "";
   let usage: UsageTokenRecord | null = null;
   /** Passthrough (OpenAI CC shape): saw tool_calls in stream before finish_reason */
   let passthroughHasToolCalls = false;
@@ -185,6 +202,18 @@ export function createSSEStream(options: StreamOptions = {}) {
   // Per-stream instances to avoid shared state with concurrent streams
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
+  const pendingSSEEvents: ParsedSSEChunk[] = [];
+  const sseParser = createParser({
+    onEvent(message) {
+      pendingSSEEvents.push({
+        raw: formatIncomingSSEEvent(message),
+        data: message.data,
+      });
+    },
+    onError(error: ParseError) {
+      logStreamDebug("parse", error, "eventsource-parser");
+    },
+  });
 
   // Idle timeout state — closes stream if provider stops sending data
   let lastChunkTime = Date.now();
@@ -253,14 +282,12 @@ export function createSSEStream(options: StreamOptions = {}) {
         if (streamTimedOut) return;
         lastChunkTime = Date.now();
         const text = decoder.decode(chunk, { stream: true });
-        buffer += text;
         reqLogger?.appendProviderChunk?.(text);
+        sseParser.feed(text);
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
+        for (const eventChunk of pendingSSEEvents.splice(0)) {
+          const trimmed = eventChunk.raw.trim();
+          const data = eventChunk.data.trim();
 
           // Passthrough mode: normalize and forward
           if (mode === STREAM_MODE.PASSTHROUGH) {
@@ -268,19 +295,20 @@ export function createSSEStream(options: StreamOptions = {}) {
             let injectedUsage = false;
             let clientPayload: unknown = null;
 
-            if (trimmed.startsWith("data:")) {
-              const providerPayload = parseSSELine(trimmed, { suppressParseErrorLog: true });
-              if (providerPayload) {
-                providerPayloadCollector.push(providerPayload);
-                if ((providerPayload as { done?: unknown }).done === true) {
-                  clientPayloadCollector.push(providerPayload);
-                }
+            const providerPayload =
+              data === "[DONE]"
+                ? { done: true }
+                : parseSSELine(`data: ${data}`, { suppressParseErrorLog: true });
+            if (providerPayload) {
+              providerPayloadCollector.push(providerPayload);
+              if ((providerPayload as { done?: unknown }).done === true) {
+                clientPayloadCollector.push(providerPayload);
               }
             }
 
-            if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
+            if (data !== "[DONE]") {
               try {
-                let parsed = JSON.parse(trimmed.slice(5).trim());
+                let parsed = JSON.parse(data);
 
                 // Detect Responses SSE payloads (have a `type` field like "response.created",
                 // "response.output_item.added", etc.) and skip Chat Completions-specific
@@ -337,7 +365,7 @@ export function createSSEStream(options: StreamOptions = {}) {
                   }
                   if (parsed.delta?.thinking) {
                     totalContentLength += parsed.delta.thinking.length;
-                    passthroughAccumulatedContent += parsed.delta.thinking;
+                    passthroughAccumulatedReasoning += parsed.delta.thinking;
                   }
                   if (restoredToolName) {
                     output = `data: ${JSON.stringify(parsed)}\n\n`;
@@ -461,7 +489,12 @@ export function createSSEStream(options: StreamOptions = {}) {
                     }
                   }
                   if (isFinishChunk && !hasValidUsage(parsed.usage)) {
-                    const estimated = estimateUsage(body, totalContentLength, FORMATS.OPENAI);
+                    const estimated = estimateUsage(
+                      body,
+                      totalContentLength,
+                      FORMATS.OPENAI,
+                      body?.model
+                    );
                     parsed.usage = filterUsageForFormat(estimated, FORMATS.OPENAI);
                     output = `data: ${JSON.stringify(parsed)}\n\n`;
                     usage = estimated;
@@ -476,7 +509,6 @@ export function createSSEStream(options: StreamOptions = {}) {
                     injectedUsage = true;
                   }
                 }
-
                 clientPayload = parsed;
               } catch (error) {
                 logStreamDebug("parse", error, "passthrough chunk parse/sanitize");
@@ -484,11 +516,7 @@ export function createSSEStream(options: StreamOptions = {}) {
             }
 
             if (!injectedUsage) {
-              if (line.startsWith("data:") && !line.startsWith("data: ")) {
-                output = "data: " + line.slice(5) + "\n";
-              } else {
-                output = line + "\n";
-              }
+              output = eventChunk.raw;
             }
 
             if (clientPayload) {
@@ -503,7 +531,10 @@ export function createSSEStream(options: StreamOptions = {}) {
           // Translate mode
           if (!trimmed) continue;
 
-          const parsed = parseSSELine(trimmed, { suppressParseErrorLog: true });
+          const parsed =
+            data === "[DONE]"
+              ? { done: true }
+              : parseSSELine(`data: ${data}`, { suppressParseErrorLog: true });
           if (!parsed) continue;
           providerPayloadCollector.push(parsed);
 
@@ -669,7 +700,12 @@ export function createSSEStream(options: StreamOptions = {}) {
                 !hasValidUsage(itemSanitized.usage) &&
                 totalContentLength > 0
               ) {
-                const estimated = estimateUsage(body, totalContentLength, sourceFormat);
+                const estimated = estimateUsage(
+                  body,
+                  totalContentLength,
+                  sourceFormat,
+                  body?.model
+                );
                 itemSanitized.usage = filterUsageForFormat(estimated, sourceFormat); // Filter + already has buffer
                 state.usage = estimated;
               } else if (state.finishReason && isFinishChunk && state.usage) {
@@ -686,7 +722,6 @@ export function createSSEStream(options: StreamOptions = {}) {
           }
         }
       },
-
       flush(controller) {
         // Clean up idle watchdog timer
         if (idleTimer) {
@@ -699,18 +734,26 @@ export function createSSEStream(options: StreamOptions = {}) {
         trackPendingRequest(model, provider, connectionId, false);
         try {
           const remaining = decoder.decode();
-          if (remaining) buffer += remaining;
+          if (remaining) {
+            reqLogger?.appendProviderChunk?.(remaining);
+            sseParser.feed(remaining);
+          }
 
           if (mode === STREAM_MODE.PASSTHROUGH) {
-            if (buffer) {
-              let output = buffer;
-              if (buffer.startsWith("data:") && !buffer.startsWith("data: ")) {
-                output = "data: " + buffer.slice(5);
-              }
-              const bufferedPayload = parseSSELine(buffer.trim(), { suppressParseErrorLog: true });
+            for (const eventChunk of pendingSSEEvents.splice(0)) {
+              let output = eventChunk.raw;
+              const bufferedPayload =
+                eventChunk.data.trim() === "[DONE]"
+                  ? { done: true }
+                  : parseSSELine(`data: ${eventChunk.data.trim()}`, {
+                      suppressParseErrorLog: true,
+                    });
               if (bufferedPayload) {
                 providerPayloadCollector.push(bufferedPayload);
                 clientPayloadCollector.push(bufferedPayload);
+              }
+              if (eventChunk.raw.startsWith("data:") && !eventChunk.raw.startsWith("data: ")) {
+                output = "data: " + eventChunk.raw.slice(5);
               }
               reqLogger?.appendConvertedChunk?.(output);
               controller.enqueue(encoder.encode(output));
@@ -718,7 +761,12 @@ export function createSSEStream(options: StreamOptions = {}) {
 
             // Estimate usage if provider didn't return valid usage
             if (!hasValidUsage(usage) && totalContentLength > 0) {
-              usage = estimateUsage(body, totalContentLength, sourceFormat || FORMATS.OPENAI);
+              usage = estimateUsage(
+                body,
+                totalContentLength,
+                sourceFormat || FORMATS.OPENAI,
+                body?.model
+              );
             }
 
             if (hasValidUsage(usage)) {
@@ -784,17 +832,17 @@ export function createSSEStream(options: StreamOptions = {}) {
             return;
           }
 
-          // Translate mode: process remaining buffer
-          if (buffer.trim()) {
-            const parsed = parseSSELine(buffer.trim(), { suppressParseErrorLog: true });
+          // Translate mode: process remaining parsed events
+          for (const eventChunk of pendingSSEEvents.splice(0)) {
+            const data = eventChunk.data.trim();
+            const parsed =
+              data === "[DONE]"
+                ? { done: true }
+                : parseSSELine(`data: ${data}`, { suppressParseErrorLog: true });
             if (parsed && !parsed.done) {
               providerPayloadCollector.push(parsed);
-              // Extract usage from remaining buffer — if the usage-bearing event
-              // (e.g. response.completed) is the last SSE line, it ends up here
-              // in the flush handler where extractUsage was not called.
-              // Non-destructive merge: some providers send usage across multiple
-              // events (e.g. prompt_tokens in message_start, completion_tokens
-              // in message_delta). Direct assignment would lose earlier data.
+              // Extract usage from trailing event if the usage-bearing event
+              // (e.g. response.completed) arrives at stream end.
               const extracted = extractUsage(parsed);
               if (extracted) {
                 state.usage = mergeUsageSnapshot(

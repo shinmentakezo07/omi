@@ -565,7 +565,7 @@ export class CursorExecutor extends BaseExecutor {
       message.tool_calls = toolCalls;
     }
 
-    const usage = estimateUsage(body, totalContent.length, FORMATS.OPENAI);
+    const usage = estimateUsage(body, totalContent.length, FORMATS.OPENAI, body?.model);
 
     const completion = {
       id: responseId,
@@ -868,7 +868,7 @@ export class CursorExecutor extends BaseExecutor {
       );
     }
 
-    const usage = estimateUsage(body, totalContent.length, FORMATS.OPENAI);
+    const usage = estimateUsage(body, totalContent.length, FORMATS.OPENAI, body?.model);
 
     chunks.push(
       `data: ${JSON.stringify({

@@ -1,3 +1,4 @@
+import { env, envFlag } from "@/env";
 import path from "path";
 
 const DEFAULT_APP_LOG_RETENTION_DAYS = 7;
@@ -35,37 +36,37 @@ export function parseFileSize(raw: string | undefined): number {
 }
 
 export function getAppLogToFile(): boolean {
-  return process.env.APP_LOG_TO_FILE !== "false";
+  return env.APP_LOG_TO_FILE === undefined ? true : envFlag(env.APP_LOG_TO_FILE);
 }
 
 export function getAppLogFilePath(): string {
-  return process.env.APP_LOG_FILE_PATH || DEFAULT_APP_LOG_PATH;
+  return env.APP_LOG_FILE_PATH || DEFAULT_APP_LOG_PATH;
 }
 
 export function getAppLogMaxFileSize(): number {
-  return parseFileSize(process.env.APP_LOG_MAX_FILE_SIZE);
+  return parseFileSize(env.APP_LOG_MAX_FILE_SIZE);
 }
 
 export function getAppLogRetentionDays(): number {
-  return parsePositiveInt(process.env.APP_LOG_RETENTION_DAYS, DEFAULT_APP_LOG_RETENTION_DAYS);
+  return parsePositiveInt(env.APP_LOG_RETENTION_DAYS, DEFAULT_APP_LOG_RETENTION_DAYS);
 }
 
 export function getCallLogRetentionDays(): number {
-  return parsePositiveInt(process.env.CALL_LOG_RETENTION_DAYS, DEFAULT_CALL_LOG_RETENTION_DAYS);
+  return parsePositiveInt(env.CALL_LOG_RETENTION_DAYS, DEFAULT_CALL_LOG_RETENTION_DAYS);
 }
 
 export function getAppLogMaxFiles(): number {
-  return parsePositiveInt(process.env.APP_LOG_MAX_FILES, DEFAULT_APP_LOG_MAX_FILES);
+  return parsePositiveInt(env.APP_LOG_MAX_FILES, DEFAULT_APP_LOG_MAX_FILES);
 }
 
 export function getCallLogMaxEntries(): number {
-  return parsePositiveInt(process.env.CALL_LOG_MAX_ENTRIES, DEFAULT_CALL_LOG_MAX_ENTRIES);
+  return parsePositiveInt(env.CALL_LOG_MAX_ENTRIES, DEFAULT_CALL_LOG_MAX_ENTRIES);
 }
 
 export function getAppLogLevel(defaultLevel: string): string {
-  return process.env.APP_LOG_LEVEL || defaultLevel;
+  return env.APP_LOG_LEVEL || defaultLevel;
 }
 
 export function getAppLogFormat(defaultFormat: string): string {
-  return process.env.APP_LOG_FORMAT || defaultFormat;
+  return env.APP_LOG_FORMAT || defaultFormat;
 }

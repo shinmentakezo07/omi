@@ -2,6 +2,7 @@ import { HTTP_STATUS, FETCH_TIMEOUT_MS } from "../config/constants.ts";
 import { applyFingerprint, isCliCompatEnabled } from "../config/cliFingerprints.ts";
 import { getRotatingApiKey } from "../services/apiKeyRotator.ts";
 import { getOpenAICompatibleType } from "../services/provider.ts";
+import pRetry from "p-retry";
 
 /**
  * Sanitizes a custom API path to prevent path traversal attacks.
@@ -63,7 +64,28 @@ export type ExecuteInput = {
   upstreamExtraHeaders?: Record<string, string> | null;
 };
 
-/** Apply model-level extra upstream headers (e.g. Authentication, X-Custom-Auth). */
+class RetryableStatusError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "RetryableStatusError";
+    this.status = status;
+  }
+}
+
+function isRetryableExecutorError(error: unknown) {
+  if (error instanceof RetryableStatusError) return true;
+  if (!(error instanceof Error)) return false;
+  return (
+    error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    error.message.includes("UND_ERR") ||
+    error.message.includes("ECONN") ||
+    error.message.includes("fetch failed")
+  );
+}
+
 export function mergeUpstreamExtraHeaders(
   headers: Record<string, string>,
   extra?: Record<string, string> | null
@@ -263,16 +285,12 @@ export class BaseExecutor {
     const fallbackCount = this.getFallbackCount();
     let lastError: unknown = null;
     let lastStatus = 0;
-    // Track per-URL intra-retry attempts to avoid infinite loops
-    const retryAttemptsByUrl: Record<number, number> = {};
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
       const headers = this.buildHeaders(credentials, stream);
       applyConfiguredUserAgent(headers, credentials?.providerSpecificData);
 
-      // Append 1M context beta header when [1m] suffix was used
-      // Only supported for specific Claude models per Anthropic docs
       if (extendedContext) {
         const EXTENDED_CONTEXT_MODELS = [
           "claude-opus-4-6",
@@ -296,14 +314,9 @@ export class BaseExecutor {
       const transformedBody = await this.transformRequest(model, body, stream, credentials);
 
       try {
-        // Apply timeout to all requests. Non-streaming requests need this to prevent
-        // stalled connections. Streaming requests also need it for the initial fetch() call
-        // to prevent hanging on unresponsive providers (e.g. 300s TCP default timeout — #769).
-        // Stream idle detection (STREAM_IDLE_TIMEOUT_MS) handles stalls after data starts flowing.
         const timeoutSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
         const combinedSignal = signal ? mergeAbortSignals(signal, timeoutSignal) : timeoutSignal;
 
-        // Apply CLI fingerprint ordering if enabled for this provider
         let finalHeaders = headers;
         let bodyString = JSON.stringify(transformedBody);
 
@@ -322,23 +335,33 @@ export class BaseExecutor {
         };
         if (combinedSignal) fetchOptions.signal = combinedSignal;
 
-        const response = await fetch(url, fetchOptions);
-
-        // Intra-URL retry: if 429 and we haven't exhausted per-URL retries, wait and retry the same URL
-        if (
-          response.status === HTTP_STATUS.RATE_LIMITED &&
-          (retryAttemptsByUrl[urlIndex] ?? 0) < BaseExecutor.RETRY_CONFIG.maxAttempts
-        ) {
-          retryAttemptsByUrl[urlIndex] = (retryAttemptsByUrl[urlIndex] ?? 0) + 1;
-          const attempt = retryAttemptsByUrl[urlIndex];
-          log?.debug?.(
-            "RETRY",
-            `429 intra-retry ${attempt}/${BaseExecutor.RETRY_CONFIG.maxAttempts} on ${url} — waiting ${BaseExecutor.RETRY_CONFIG.delayMs}ms`
-          );
-          await new Promise((resolve) => setTimeout(resolve, BaseExecutor.RETRY_CONFIG.delayMs));
-          urlIndex--; // re-run this urlIndex on the next loop iteration
-          continue;
-        }
+        const response = await pRetry(
+          async () => {
+            const candidate = await fetch(url, fetchOptions);
+            if (candidate.status === HTTP_STATUS.RATE_LIMITED) {
+              throw new RetryableStatusError(
+                candidate.status,
+                `HTTP ${candidate.status} returned by ${url}`
+              );
+            }
+            return candidate;
+          },
+          {
+            retries: BaseExecutor.RETRY_CONFIG.maxAttempts - 1,
+            minTimeout: BaseExecutor.RETRY_CONFIG.delayMs,
+            maxTimeout: BaseExecutor.RETRY_CONFIG.delayMs,
+            shouldRetry: ({ error }) => {
+              if (error instanceof RetryableStatusError) {
+                log?.debug?.(
+                  "RETRY",
+                  `429 intra-retry on ${url} — waiting ${BaseExecutor.RETRY_CONFIG.delayMs}ms`
+                );
+                return true;
+              }
+              return isRetryableExecutorError(error);
+            },
+          }
+        );
 
         if (this.shouldRetry(response.status, urlIndex)) {
           log?.debug?.("RETRY", `${response.status} on ${url}, trying fallback ${urlIndex + 1}`);
@@ -348,7 +371,6 @@ export class BaseExecutor {
 
         return { response, url, headers: finalHeaders, transformedBody };
       } catch (error) {
-        // Distinguish timeout errors from other abort errors
         const err = error instanceof Error ? error : new Error(String(error));
         if (err.name === "TimeoutError") {
           log?.warn?.("TIMEOUT", `Fetch timeout after ${FETCH_TIMEOUT_MS}ms on ${url}`);

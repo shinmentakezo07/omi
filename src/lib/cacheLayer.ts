@@ -9,109 +9,91 @@
  */
 
 import crypto from "crypto";
-
-/**
- * @typedef {Object} CacheEntry
- * @property {string} key - Cache key (hash)
- * @property {*} value - Cached value
- * @property {number} createdAt - Timestamp
- * @property {number} ttl - TTL in ms
- * @property {number} size - Approximate size in bytes
- * @property {number} hits - Number of times this entry was accessed
- */
+import { LRUCache as NodeLRUCache } from "lru-cache";
+import { env, envNumber } from "@/env";
 
 const DEFAULT_MAX_ENTRIES = 50;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
-const DEFAULT_TTL = 300000;
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  return `{${entries
+    .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+    .join(",")}}`;
+}
+
+type CacheValue = unknown;
+
+type CacheEntry = {
+  key: string;
+  value: CacheValue;
+  createdAt: number;
+  ttl: number;
+  size: number;
+  hits: number;
+};
+
+type CacheStats = {
+  hits: number;
+  misses: number;
+  evictions: number;
+};
 
 export class LRUCache {
-  /** @type {Map<string, CacheEntry>} */
-  #cache = new Map();
-  #maxSize;
-  #maxBytes;
-  #defaultTTL;
-  #currentSize = 0;
-  #currentBytes = 0;
-  #stats = { hits: 0, misses: 0, evictions: 0 };
+  #cache: NodeLRUCache<string, CacheEntry>;
+  #maxSize: number;
+  #maxBytes: number;
+  #defaultTTL: number;
+  #stats: CacheStats = { hits: 0, misses: 0, evictions: 0 };
 
-  /**
-   * @param {Object} options
-   * @param {number} [options.maxSize=50] - Max number of entries (reduced for memory)
-   * @param {number} [options.maxBytes=2097152] - Max bytes (default: 2MB)
-   * @param {number} [options.defaultTTL=300000] - Default TTL in ms (5 min)
-   */
   constructor(options: { maxSize?: number; maxBytes?: number; defaultTTL?: number } = {}) {
     this.#maxSize = options.maxSize ?? DEFAULT_MAX_ENTRIES;
     this.#maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
     this.#defaultTTL = options.defaultTTL ?? DEFAULT_TTL;
+
+    this.#cache = new NodeLRUCache<string, CacheEntry>({
+      max: this.#maxSize,
+      maxSize: this.#maxBytes,
+      ttl: this.#defaultTTL,
+      sizeCalculation: (entry) => entry.size,
+      dispose: (_value, _key, reason) => {
+        if (reason === "evict") {
+          this.#stats.evictions += 1;
+        }
+      },
+    });
   }
 
-  /**
-   * Generate a cache key from input.
-   * @param {Object} params - Parameters to hash
-   * @returns {string} Cache key
-   */
   static generateKey(params: Record<string, unknown>) {
-    const normalized = JSON.stringify(params, Object.keys(params).sort());
+    const normalized = stableStringify(params);
     return crypto.createHash("sha256").update(normalized).digest("hex").slice(0, 16);
   }
 
-  /**
-   * Get a value from the cache.
-   * @param {string} key
-   * @returns {*|undefined}
-   */
   get(key: string) {
     const entry = this.#cache.get(key);
 
     if (!entry) {
-      this.#stats.misses++;
+      this.#stats.misses += 1;
       return undefined;
     }
 
-    if (Date.now() - entry.createdAt > entry.ttl) {
-      this.#deleteEntry(key, entry);
-      this.#stats.misses++;
-      return undefined;
-    }
-
-    this.#cache.delete(key);
-    entry.hits++;
-    this.#cache.set(key, entry);
-
-    this.#stats.hits++;
+    entry.hits += 1;
+    this.#stats.hits += 1;
     return entry.value;
   }
 
-  /**
-   * Set a value in the cache.
-   * @param {string} key
-   * @param {*} value
-   * @param {number} [ttl] - Override default TTL
-   */
   set(key: string, value: unknown, ttl?: number) {
     const entrySize = this.#estimateSize(value);
-
-    if (this.#cache.has(key)) {
-      const oldEntry = this.#cache.get(key)!;
-      this.#currentBytes -= oldEntry.size || 0;
-      this.#currentSize--;
-      this.#cache.delete(key);
-    }
-
-    while (
-      (this.#currentSize >= this.#maxSize || this.#currentBytes + entrySize > this.#maxBytes) &&
-      this.#cache.size > 0
-    ) {
-      const oldestKey = this.#cache.keys().next().value;
-      const oldestEntry = this.#cache.get(oldestKey);
-      if (oldestEntry) {
-        this.#deleteEntry(oldestKey, oldestEntry);
-      }
-      this.#stats.evictions++;
-    }
-
-    const entry = {
+    const entry: CacheEntry = {
       key,
       value,
       createdAt: Date.now(),
@@ -120,14 +102,9 @@ export class LRUCache {
       hits: 0,
     };
 
-    this.#cache.set(key, entry);
-    this.#currentSize++;
-    this.#currentBytes += entrySize;
+    this.#cache.set(key, entry, { ttl: entry.ttl });
   }
 
-  /**
-   * Estimate size of a value in bytes.
-   */
   #estimateSize(value: unknown): number {
     try {
       return JSON.stringify(value).length * 2;
@@ -136,59 +113,24 @@ export class LRUCache {
     }
   }
 
-  /**
-   * Delete an entry and update counters.
-   */
-  #deleteEntry(key: string, entry: { size?: number }) {
-    this.#cache.delete(key);
-    this.#currentSize--;
-    this.#currentBytes -= entry.size || 0;
-    if (this.#currentBytes < 0) this.#currentBytes = 0;
-  }
-
-  /**
-   * Check if a key exists (without promoting it).
-   * @param {string} key
-   * @returns {boolean}
-   */
   has(key: string) {
-    const entry = this.#cache.get(key);
-    if (!entry) return false;
-    if (Date.now() - entry.createdAt > entry.ttl) {
-      this.#deleteEntry(key, entry);
-      return false;
-    }
-    return true;
+    return this.#cache.has(key);
   }
 
-  /**
-   * Delete a specific key.
-   * @param {string} key
-   * @returns {boolean}
-   */
   delete(key: string) {
-    const entry = this.#cache.get(key);
-    if (entry) {
-      this.#deleteEntry(key, entry);
-      return true;
-    }
-    return false;
+    return this.#cache.delete(key);
   }
 
-  /** Clear the entire cache. */
   clear() {
     this.#cache.clear();
-    this.#currentSize = 0;
-    this.#currentBytes = 0;
   }
 
-  /** @returns {{ size: number, maxSize: number, bytes: number, maxBytes: number, hits: number, misses: number, evictions: number, hitRate: number }} */
   getStats() {
     const total = this.#stats.hits + this.#stats.misses;
     return {
-      size: this.#currentSize,
+      size: this.#cache.size,
       maxSize: this.#maxSize,
-      bytes: this.#currentBytes,
+      bytes: this.#cache.calculatedSize,
       maxBytes: this.#maxBytes,
       ...this.#stats,
       hitRate: total > 0 ? (this.#stats.hits / total) * 100 : 0,
@@ -196,25 +138,28 @@ export class LRUCache {
   }
 }
 
-// ─── Prompt Cache Singleton ─────────────────
-
 let promptCache: LRUCache | null = null;
 
-/**
- * Get the global prompt cache instance.
- * @param {Object} [options]
- * @returns {LRUCache}
- */
 export function getPromptCache(
   options?: { maxSize?: number; maxBytes?: number; defaultTTL?: number } & Record<string, unknown>
 ) {
   if (!promptCache) {
     promptCache = new LRUCache({
-      maxSize: parseInt(process.env.PROMPT_CACHE_MAX_SIZE || "50", 10),
-      maxBytes: parseInt(process.env.PROMPT_CACHE_MAX_BYTES || String(2 * 1024 * 1024), 10),
-      defaultTTL: parseInt(process.env.PROMPT_CACHE_TTL_MS || "300000", 10),
+      maxSize: envNumber(env.PROMPT_CACHE_MAX_SIZE, DEFAULT_MAX_ENTRIES),
+      maxBytes: envNumber(env.PROMPT_CACHE_MAX_BYTES, DEFAULT_MAX_BYTES),
+      defaultTTL: envNumber(env.PROMPT_CACHE_TTL_MS, DEFAULT_TTL),
       ...options,
     });
   }
   return promptCache;
+}
+
+export function clearPromptCache() {
+  if (promptCache) {
+    promptCache.clear();
+  }
+}
+
+export function getCacheMetrics() {
+  return getPromptCache().getStats();
 }

@@ -1,3 +1,4 @@
+import { env, envFlag } from "@/env";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fetch as undiciFetch } from "undici";
 import {
@@ -11,7 +12,7 @@ import tlsClient from "./tlsClient.ts";
 import { isProxyReachable } from "@/lib/proxyHealth";
 
 function isTlsFingerprintEnabled() {
-  return process.env.ENABLE_TLS_FINGERPRINT === "true";
+  return envFlag(env.ENABLE_TLS_FINGERPRINT);
 }
 
 /** Per-request tracking of whether TLS fingerprint was used */
@@ -54,7 +55,7 @@ const originalFetchWithDispatcher = originalFetch as FetchWithDispatcher;
 const proxyContext = patchState.proxyContext;
 
 function noProxyMatch(targetUrl) {
-  const noProxy = process.env.NO_PROXY || process.env.no_proxy;
+  const noProxy = env.NO_PROXY || process.env.no_proxy;
   if (!noProxy) return false;
 
   let target;
@@ -97,14 +98,8 @@ function resolveEnvProxyUrl(targetUrl) {
 
   const proxyUrl =
     protocol === "https:"
-      ? process.env.HTTPS_PROXY ||
-        process.env.https_proxy ||
-        process.env.ALL_PROXY ||
-        process.env.all_proxy
-      : process.env.HTTP_PROXY ||
-        process.env.http_proxy ||
-        process.env.ALL_PROXY ||
-        process.env.all_proxy;
+      ? env.HTTPS_PROXY || process.env.https_proxy || env.ALL_PROXY || process.env.all_proxy
+      : env.HTTP_PROXY || process.env.http_proxy || env.ALL_PROXY || process.env.all_proxy;
 
   if (!proxyUrl) return null;
   return normalizeProxyUrl(proxyUrl, "environment proxy");
@@ -137,8 +132,6 @@ export async function runWithProxyContext(proxyConfig, fn) {
 
   const resolvedProxyUrl = proxyConfig ? proxyConfigToUrl(proxyConfig) : null;
 
-  // T14: Proxy Fast-Fail
-  // Perform a short TCP reachability check before issuing upstream requests.
   if (resolvedProxyUrl) {
     const reachable = await isProxyReachable(resolvedProxyUrl);
     if (!reachable) {
@@ -180,7 +173,6 @@ async function patchedFetch(input: RequestInfo | URL, options: FetchWithDispatch
   const { source, proxyUrl } = resolved;
 
   if (!proxyUrl) {
-    // TLS fingerprint spoofing for direct connections (no proxy configured)
     if (isTlsFingerprintEnabled() && tlsClient.available) {
       try {
         const store = tlsFingerprintContext.getStore();

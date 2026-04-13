@@ -1,5 +1,8 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
+import { useEffect } from "react";
+
 /**
  * Global Error Page — FASE-04 Error Handling
  *
@@ -14,6 +17,15 @@ interface GlobalErrorProps {
 }
 
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
+  useEffect(() => {
+    Sentry.captureException(error, {
+      tags: {
+        boundary: "global-error",
+        digest: error.digest || "unknown",
+      },
+    });
+  }, [error]);
+
   return (
     <html lang="en">
       <body className="flex flex-col items-center justify-center min-h-screen p-6 bg-bg text-text-main font-[system-ui,-apple-system,sans-serif] text-center m-0">

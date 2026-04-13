@@ -2,6 +2,7 @@
  * Token Usage Tracking - Extract, normalize, estimate and log token usage
  */
 
+import { estimateTokensWithTiktoken } from "@/lib/usage/tiktoken";
 import { appendRequestLog } from "@/lib/usageDb";
 import {
   getLoggedInputTokens,
@@ -388,8 +389,17 @@ const CHARS_PER_TOKEN_SCHEMA = 6; // ~6 chars/token for JSON schemas (more verbo
  * @param {string} text - Text to estimate tokens for
  * @returns {number} Estimated token count
  */
-function estimateTokenCount(text) {
+function estimateTokenCount(text, model = "gpt-4o-mini") {
   if (!text || typeof text !== "string") return 0;
+
+  try {
+    const exactCount = estimateTokensWithTiktoken(model, text);
+    if (exactCount > 0) {
+      return exactCount;
+    }
+  } catch {
+    // Fall back to heuristic below when tokenizer cannot handle the payload.
+  }
 
   // Count CJK ideographs separately — each is roughly 1 token
   const cjkMatches = text.match(/[\u3000-\u9fff\uf900-\ufaff\u{20000}-\u{2fa1f}]/gu);
@@ -416,7 +426,7 @@ function estimateTokenCount(text) {
  * for more accurate estimation since JSON schemas are more verbose but
  * compress into fewer tokens than plain text.
  */
-export function estimateInputTokens(body) {
+export function estimateInputTokens(body, model = "gpt-4o-mini") {
   if (!body || typeof body !== "object") return 0;
 
   try {
@@ -429,9 +439,9 @@ export function estimateInputTokens(body) {
       toolTokens = Math.ceil(toolStr.length / CHARS_PER_TOKEN_SCHEMA);
       // Estimate messages without tools
       const { tools, ...bodyWithoutTools } = body;
-      messageTokens = estimateTokenCount(JSON.stringify(bodyWithoutTools));
+      messageTokens = estimateTokenCount(JSON.stringify(bodyWithoutTools), model);
     } else {
-      messageTokens = estimateTokenCount(JSON.stringify(body));
+      messageTokens = estimateTokenCount(JSON.stringify(body), model);
     }
 
     return messageTokens + toolTokens;
@@ -482,8 +492,12 @@ export function formatUsage(inputTokens, outputTokens, targetFormat) {
  * @param {number} contentLength - Content length for output token estimation
  * @param {string} targetFormat - Target format from FORMATS constant
  */
-export function estimateUsage(body, contentLength, targetFormat = FORMATS.OPENAI) {
-  return formatUsage(estimateInputTokens(body), estimateOutputTokens(contentLength), targetFormat);
+export function estimateUsage(body, contentLength, targetFormat = FORMATS.OPENAI, model) {
+  return formatUsage(
+    estimateInputTokens(body, typeof model === "string" ? model : "gpt-4o-mini"),
+    estimateOutputTokens(contentLength),
+    targetFormat
+  );
 }
 
 /**

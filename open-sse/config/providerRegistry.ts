@@ -6,6 +6,7 @@
  * is auto-generated from this registry.
  */
 
+import { env } from "@/env";
 import { platform, arch } from "os";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -321,8 +322,8 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     oauth: {
       clientIdEnv: "QODER_OAUTH_CLIENT_ID",
       clientSecretEnv: "QODER_OAUTH_CLIENT_SECRET",
-      tokenUrl: process.env.QODER_OAUTH_TOKEN_URL || "",
-      authUrl: process.env.QODER_OAUTH_AUTHORIZE_URL || "",
+      tokenUrl: env.QODER_OAUTH_TOKEN_URL || "",
+      authUrl: env.QODER_OAUTH_AUTHORIZE_URL || "",
     },
     models: [
       { id: "qoder-rome-30ba3b", name: "Qoder ROME" },
@@ -1455,11 +1456,10 @@ export function generateLegacyProviders(): Record<string, LegacyProvider> {
     // OAuth
     if (entry.oauth) {
       if (entry.oauth.clientIdEnv) {
-        p.clientId = process.env[entry.oauth.clientIdEnv] || entry.oauth.clientIdDefault;
+        p.clientId = env[entry.oauth.clientIdEnv] || entry.oauth.clientIdDefault;
       }
       if (entry.oauth.clientSecretEnv) {
-        p.clientSecret =
-          process.env[entry.oauth.clientSecretEnv] || entry.oauth.clientSecretDefault;
+        p.clientSecret = env[entry.oauth.clientSecretEnv] || entry.oauth.clientSecretDefault;
       }
       if (entry.oauth.tokenUrl) p.tokenUrl = entry.oauth.tokenUrl;
       if (entry.oauth.refreshUrl) p.refreshUrl = entry.oauth.refreshUrl;
@@ -1505,8 +1505,8 @@ export function generateAliasMap(): Record<string, string> {
 const LOCAL_HOSTNAMES = new Set([
   "localhost",
   "127.0.0.1",
-  ...(typeof process !== "undefined" && process.env.LOCAL_HOSTNAMES
-    ? process.env.LOCAL_HOSTNAMES.split(",")
+  ...(env.LOCAL_HOSTNAMES
+    ? env.LOCAL_HOSTNAMES.split(",")
         .map((h) => h.trim())
         .filter(Boolean)
     : []),

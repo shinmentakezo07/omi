@@ -10,6 +10,7 @@
  * @module lib/idempotencyLayer
  */
 
+import { getRedisClient } from "@/lib/redis";
 import { getSettings } from "@/lib/localDb";
 
 const DEFAULT_WINDOW_MS = 5000;
@@ -34,6 +35,32 @@ function ensureCleanup() {
   if (cleanupInterval.unref) cleanupInterval.unref();
 }
 
+function persistIdempotencyToRedis(key, response, status, windowMs) {
+  const redis = getRedisClient();
+  if (!redis) return;
+  void redis
+    .set(`idempotency:${key}`, JSON.stringify({ response, status }), "PX", windowMs)
+    .catch(() => {
+      // Fail open to in-memory fallback
+    });
+}
+
+function clearIdempotencyInRedis() {
+  const redis = getRedisClient();
+  if (!redis) return;
+  void redis
+    .keys("idempotency:*")
+    .then((keys) => {
+      if (keys.length > 0) {
+        return redis.del(...keys);
+      }
+      return 0;
+    })
+    .catch(() => {
+      // Ignore redis cleanup failures in tests
+    });
+}
+
 /**
  * Extract idempotency key from request headers.
  * @param {Headers|object} headers
@@ -52,6 +79,7 @@ export function getIdempotencyKey(headers) {
  */
 export function checkIdempotency(key) {
   if (!key) return null;
+
   const entry = idempotencyStore.get(key);
   if (!entry) return null;
   if (Date.now() >= entry.expiresAt) {
@@ -71,11 +99,13 @@ export function checkIdempotency(key) {
 export function saveIdempotency(key, response, status, windowMs = DEFAULT_WINDOW_MS) {
   if (!key) return;
   ensureCleanup();
-  idempotencyStore.set(key, {
+  const entry = {
     response,
     status,
     expiresAt: Date.now() + windowMs,
-  });
+  };
+  idempotencyStore.set(key, entry);
+  persistIdempotencyToRedis(key, response, status, windowMs);
 }
 
 /**
@@ -102,4 +132,5 @@ export async function getIdempotencyStats() {
  */
 export function clearIdempotency() {
   idempotencyStore.clear();
+  clearIdempotencyInRedis();
 }
