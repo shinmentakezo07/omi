@@ -1,13 +1,29 @@
 "use client";
 
 import { useMemo, useState, Suspense } from "react";
-import { UsageAnalytics, CardSkeleton, SegmentedControl } from "@/shared/components";
-import EvalsTab from "../usage/components/EvalsTab";
-import SearchAnalyticsTab from "./SearchAnalyticsTab";
-import DiversityScoreCard from "./components/DiversityScoreCard";
-import ProviderUtilizationTab from "./ProviderUtilizationTab";
-import ComboHealthTab from "./ComboHealthTab";
+import dynamic from "next/dynamic";
+import { CardSkeleton, SegmentedControl } from "@/shared/components";
 import { useTranslations } from "next-intl";
+
+const UsageAnalytics = dynamic(
+  () => import("@/shared/components").then((mod) => mod.UsageAnalytics),
+  { loading: () => <CardSkeleton /> }
+);
+const EvalsTab = dynamic(() => import("../usage/components/EvalsTab"), {
+  loading: () => <CardSkeleton />,
+});
+const SearchAnalyticsTab = dynamic(() => import("./SearchAnalyticsTab"), {
+  loading: () => <CardSkeleton />,
+});
+const DiversityScoreCard = dynamic(() => import("./components/DiversityScoreCard"), {
+  loading: () => <CardSkeleton />,
+});
+const ProviderUtilizationTab = dynamic(() => import("./ProviderUtilizationTab"), {
+  loading: () => <CardSkeleton />,
+});
+const ComboHealthTab = dynamic(() => import("./ComboHealthTab"), {
+  loading: () => <CardSkeleton />,
+});
 
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState("overview");

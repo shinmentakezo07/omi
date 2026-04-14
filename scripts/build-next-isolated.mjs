@@ -27,7 +27,12 @@ async function exists(targetPath) {
 function runNextBuild() {
   return new Promise((resolve) => {
     const nextBin = path.join(projectRoot, "node_modules", "next", "dist", "bin", "next");
-    const child = spawn(process.execPath, [nextBin, "build"], {
+    const nextArgs = [nextBin, "build"];
+    if (process.env.ANALYZE === "true") {
+      nextArgs.push("--webpack");
+    }
+
+    const child = spawn(process.execPath, nextArgs, {
       cwd: projectRoot,
       stdio: "inherit",
       env: process.env,

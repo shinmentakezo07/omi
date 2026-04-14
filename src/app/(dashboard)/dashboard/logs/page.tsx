@@ -1,10 +1,23 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { RequestLoggerV2, ProxyLogger, SegmentedControl } from "@/shared/components";
-import ConsoleLogViewer from "@/shared/components/ConsoleLogViewer";
-import AuditLogTab from "./AuditLogTab";
+import dynamic from "next/dynamic";
+import { SegmentedControl, CardSkeleton } from "@/shared/components";
 import { useTranslations } from "next-intl";
+
+const RequestLoggerV2 = dynamic(
+  () => import("@/shared/components").then((mod) => mod.RequestLoggerV2),
+  { loading: () => <CardSkeleton /> }
+);
+const ProxyLogger = dynamic(() => import("@/shared/components").then((mod) => mod.ProxyLogger), {
+  loading: () => <CardSkeleton />,
+});
+const ConsoleLogViewer = dynamic(() => import("@/shared/components/ConsoleLogViewer"), {
+  loading: () => <CardSkeleton />,
+});
+const AuditLogTab = dynamic(() => import("./AuditLogTab"), {
+  loading: () => <CardSkeleton />,
+});
 
 const TIME_RANGES = [
   { label: "1h", hours: 1 },

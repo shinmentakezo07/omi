@@ -1,7 +1,7 @@
 {
   "name": "omniroute",
   "version": "3.5.5",
-  "description": "Smart AI Router with auto fallback — route to FREE & cheap models, zero downtime. Works with Cursor, Cline, Claude Desktop, Codex, and any OpenAI-compatible tool.",
+  "description": "Smart AI Router with auto fallback \u2014 route to FREE & cheap models, zero downtime. Works with Cursor, Cline, Claude Desktop, Codex, and any OpenAI-compatible tool.",
   "type": "module",
   "bin": {
     "omniroute": "bin/omniroute.mjs",
@@ -86,7 +86,8 @@
     "prepublishOnly": "npm run build:cli",
     "postinstall": "node scripts/postinstall.mjs",
     "prepare": "husky",
-    "system-info": "node scripts/system-info.mjs"
+    "system-info": "node scripts/system-info.mjs",
+    "analyze": "cross-env ANALYZE=true node scripts/build-next-isolated.mjs"
   },
   "dependencies": {
     "@lobehub/icons": "^5.0.1",
@@ -146,6 +147,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.11",
+    "@next/bundle-analyzer": "^16.2.3",
     "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
