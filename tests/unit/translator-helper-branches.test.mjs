@@ -6,6 +6,9 @@ const openaiHelper = await import("../../open-sse/translator/helpers/openaiHelpe
 const claudeHelper = await import("../../open-sse/translator/helpers/claudeHelper.ts");
 const geminiHelper = await import("../../open-sse/translator/helpers/geminiHelper.ts");
 const toolCallHelper = await import("../../open-sse/translator/helpers/toolCallHelper.ts");
+const finishReasonHelper = await import("../../open-sse/translator/helpers/finishReasonHelper.ts");
+const providerToolCapabilities =
+  await import("../../open-sse/translator/helpers/providerToolCapabilities.ts");
 
 const originalMathRandom = Math.random;
 
@@ -467,4 +470,24 @@ test("toolCallHelper normalizes ids, links tool responses and inserts missing to
   );
   assert.equal(toolCallHelper.hasToolResults({ role: "user", content: [] }, []), false);
   assert.deepEqual(toolCallHelper.fixMissingToolResponses({ messages: null }), { messages: null });
+});
+
+test("toolCallHelper normalizes tool args and finish/provider helpers expose expected branches", () => {
+  assert.equal(toolCallHelper.normalizeToolCallArguments({ a: 1 }), JSON.stringify({ a: 1 }));
+  assert.equal(toolCallHelper.normalizeToolCallArguments(undefined), "{}");
+  assert.equal(
+    finishReasonHelper.normalizeOpenAIFinishReason("stop", null, { forceToolCalls: true }),
+    "tool_calls"
+  );
+  assert.equal(finishReasonHelper.normalizeOpenAIFinishReason("max_tokens", null), "length");
+
+  const claudeCaps = providerToolCapabilities.getProviderToolCapabilities("claude", "claude-4");
+  assert.equal(claudeCaps.requiresImmediateToolResults, true);
+  assert.equal(claudeCaps.rejectsEmptyTextBlocks, true);
+
+  const deepseekCaps = providerToolCapabilities.getProviderToolCapabilities(
+    "deepseek",
+    "deepseek-reasoner"
+  );
+  assert.equal(deepseekCaps.requiresReasoningContentForToolCalls, true);
 });

@@ -84,3 +84,9 @@ test("Kiro -> OpenAI: unknown or empty events are ignored", () => {
   assert.equal(convertKiroToOpenAI("event:unknown\ndata:{}\n\n", {}), null);
   assert.equal(convertKiroToOpenAI("event:assistantResponseEvent\n\n", {}), null);
 });
+
+test("Kiro -> OpenAI: done event emits tool_calls when tool use was seen", () => {
+  const state = { hasToolCalls: true };
+  const done = convertKiroToOpenAI("event:done\ndata:{}\n\n", state);
+  assert.equal(done.choices[0].finish_reason, "tool_calls");
+});

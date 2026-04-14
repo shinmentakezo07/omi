@@ -234,3 +234,22 @@ test("Gemini stream: safety block without candidates emits role chunk then conte
 test("Gemini stream: null chunk is ignored", () => {
   assert.equal(geminiToOpenAIResponse(null, createStreamingState()), null);
 });
+
+test("Gemini stream: stop finish with tool calls becomes tool_calls", () => {
+  const state = createStreamingState();
+  const result = geminiToOpenAIResponse(
+    {
+      responseId: "resp-tool-stop",
+      modelVersion: "gemini-2.5-pro",
+      candidates: [
+        {
+          content: { parts: [{ functionCall: { name: "weather", args: { city: "Tokyo" } } }] },
+          finishReason: "STOP",
+        },
+      ],
+    },
+    state
+  );
+
+  assert.equal(result[result.length - 1].choices[0].finish_reason, "tool_calls");
+});

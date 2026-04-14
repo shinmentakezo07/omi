@@ -1,6 +1,7 @@
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
 import { storeGeminiThoughtSignature } from "../../services/geminiThoughtSignatureStore.ts";
+import { normalizeOpenAIFinishReason } from "../helpers/finishReasonHelper.ts";
 
 // Convert Gemini response chunk to OpenAI format
 export function geminiToOpenAIResponse(chunk, state) {
@@ -276,9 +277,10 @@ export function geminiToOpenAIResponse(chunk, state) {
   // Finish reason - include usage in final chunk
   if (candidate.finishReason) {
     let finishReason = candidate.finishReason.toLowerCase();
-    if (finishReason === "stop" && state.toolCalls.size > 0) {
-      finishReason = "tool_calls";
-    } else if (finishReason === "max_tokens") {
+    finishReason = normalizeOpenAIFinishReason(finishReason, null, {
+      forceToolCalls: state.toolCalls.size > 0,
+    });
+    if (finishReason === "max_tokens") {
       finishReason = "length";
     }
     // Content blocked by Gemini safety filters — pass through as "content_filter"

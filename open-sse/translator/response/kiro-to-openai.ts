@@ -4,6 +4,7 @@
  */
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
+import { normalizeOpenAIFinishReason } from "../helpers/finishReasonHelper.ts";
 
 /**
  * Parse Kiro SSE event and convert to OpenAI format
@@ -153,7 +154,9 @@ export function convertKiroToOpenAI(chunk, state) {
 
   // Handle completion/done events
   if (eventType === "messageStopEvent" || eventType === "done" || data.messageStopEvent) {
-    state.finishReason = "stop"; // Mark for usage injection in stream.js
+    state.finishReason = normalizeOpenAIFinishReason("stop", null, {
+      forceToolCalls: Boolean(state.hasToolCalls),
+    }); // Mark for usage injection in stream.js
 
     const openaiChunk: Record<string, unknown> = {
       id: state.responseId,
@@ -164,7 +167,9 @@ export function convertKiroToOpenAI(chunk, state) {
         {
           index: 0,
           delta: {},
-          finish_reason: "stop",
+          finish_reason: normalizeOpenAIFinishReason("stop", null, {
+            forceToolCalls: Boolean(state.hasToolCalls),
+          }),
         },
       ],
     };

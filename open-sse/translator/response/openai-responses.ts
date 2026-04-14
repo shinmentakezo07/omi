@@ -1,5 +1,7 @@
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
+import { normalizeOpenAIFinishReason } from "../helpers/finishReasonHelper.ts";
+import { normalizeToolCallArguments } from "../helpers/toolCallHelper.ts";
 
 function normalizeToolName(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -40,7 +42,7 @@ function buildCompletedOutput(state) {
       type: "function_call",
       call_id: callId,
       name: state.funcNames[idx] || "",
-      arguments: state.funcArgsBuf[idx] || "{}",
+      arguments: normalizeToolCallArguments(state.funcArgsBuf[idx] || "{}"),
     });
   }
 
@@ -366,7 +368,7 @@ function emitToolCall(state, emit, tc) {
 function closeToolCall(state, emit, idx) {
   const callId = state.funcCallIds[idx];
   if (callId && !state.funcItemDone[idx]) {
-    const args = state.funcArgsBuf[idx] || "{}";
+    const args = normalizeToolCallArguments(state.funcArgsBuf[idx] || "{}");
 
     emit("response.function_call_arguments.done", {
       type: "response.function_call_arguments.done",
@@ -504,7 +506,9 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
           {
             index: 0,
             delta: {},
-            finish_reason: hadToolCalls ? "tool_calls" : "stop",
+            finish_reason: normalizeOpenAIFinishReason("stop", null, {
+              forceToolCalls: hadToolCalls,
+            }),
           },
         ],
       };
@@ -645,7 +649,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
         return null;
       }
 
-      toolState.argsBuffer = argsFromItem || toolState.argsBuffer;
+      toolState.argsBuffer = normalizeToolCallArguments(argsFromItem || toolState.argsBuffer);
       toolState.completed = true;
       state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
 
@@ -687,7 +691,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
         return null;
       }
 
-      toolState.argsBuffer = argsFromItem || toolState.argsBuffer;
+      toolState.argsBuffer = normalizeToolCallArguments(argsFromItem || toolState.argsBuffer);
       toolState.completed = true;
       state.toolCallIndex = Math.max(Number(state.toolCallIndex || 0), outputIndex + 1);
       return {
@@ -752,7 +756,7 @@ export function openaiResponsesToOpenAIResponse(chunk, state) {
       state.finishReasonSent = true;
       const hadToolCalls =
         Array.isArray(state.responseToolCallOrder) && state.responseToolCallOrder.length > 0;
-      const reason = hadToolCalls ? "tool_calls" : "stop";
+      const reason = normalizeOpenAIFinishReason("stop", null, { forceToolCalls: hadToolCalls });
       state.finishReason = reason;
 
       const finalChunk = {

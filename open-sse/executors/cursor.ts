@@ -29,6 +29,7 @@ import {
 } from "../utils/cursorProtobuf.ts";
 import { estimateUsage } from "../utils/usageTracking.ts";
 import { FORMATS } from "../translator/formats.ts";
+import { normalizeOpenAIFinishReason } from "../translator/helpers/finishReasonHelper.ts";
 import crypto from "crypto";
 import { v5 as uuidv5 } from "uuid";
 import zlib from "zlib";
@@ -576,7 +577,9 @@ export class CursorExecutor extends BaseExecutor {
         {
           index: 0,
           message,
-          finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+          finish_reason: normalizeOpenAIFinishReason("stop", null, {
+            forceToolCalls: toolCalls.length > 0,
+          }),
         },
       ],
       usage,
@@ -880,7 +883,9 @@ export class CursorExecutor extends BaseExecutor {
           {
             index: 0,
             delta: {},
-            finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+            finish_reason: normalizeOpenAIFinishReason("stop", null, {
+              forceToolCalls: toolCalls.length > 0,
+            }),
           },
         ],
         usage,

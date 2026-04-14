@@ -1,5 +1,6 @@
 import { FORMATS } from "./formats.ts";
 import { ensureToolCallIds, fixMissingToolResponses } from "./helpers/toolCallHelper.ts";
+import { getProviderToolCapabilities } from "./helpers/providerToolCapabilities.ts";
 import { prepareClaudeRequest } from "./helpers/claudeHelper.ts";
 import { filterToOpenAIFormat } from "./helpers/openaiHelper.ts";
 import {
@@ -91,7 +92,8 @@ export function translateRequest(
   }
 ) {
   let result = body;
-  const use9CharId = options?.normalizeToolCallId === true;
+  const capabilities = getProviderToolCapabilities(provider, model);
+  const use9CharId = options?.normalizeToolCallId === true || capabilities.requiresShortToolCallIds;
   const preserveDeveloperRole = options?.preserveDeveloperRole;
 
   // Phase 2: Apply thinking budget control before normalization
@@ -104,7 +106,7 @@ export function translateRequest(
   ensureToolCallIds(result, { use9CharId });
 
   // Fix missing tool responses (insert empty tool_result if needed)
-  fixMissingToolResponses(result);
+  fixMissingToolResponses(result, { force: capabilities.requiresImmediateToolResults });
 
   // Normalize roles: developer→system unless preserved, system→user for incompatible models.
   // This handles (1) sourceFormat openai with messages containing developer → non-openai target
@@ -160,7 +162,7 @@ export function translateRequest(
   if (targetFormat === FORMATS.CLAUDE) {
     const isClaudePassthrough = sourceFormat === FORMATS.CLAUDE;
     const preserveCache = isClaudePassthrough || options?.preserveCacheControl === true;
-    result = prepareClaudeRequest(result, provider, preserveCache);
+    result = prepareClaudeRequest(result, provider, preserveCache, capabilities);
   }
 
   // Normalize openai-responses input shape for providers that require list input.
@@ -197,7 +199,7 @@ export function translateRequest(
 
   // Ensure unique tool_call ids on final payload (translators may have introduced duplicates)
   ensureToolCallIds(result, { use9CharId });
-  fixMissingToolResponses(result);
+  fixMissingToolResponses(result, { force: capabilities.requiresImmediateToolResults });
 
   if (result.tools) {
     result.tools = coerceToolSchemas(result.tools);
@@ -206,8 +208,7 @@ export function translateRequest(
 
   // Inject reasoning_content = "" for DeepSeek/Reasoning models assistant messages with tool_calls
   // if omitted by the client, to avoid upstream 400 errors (e.g. "Messages with role 'assistant' that contain tool_calls must also include reasoning_content")
-  const isReasoner =
-    provider === "deepseek" || (typeof model === "string" && /r1|reason/i.test(model));
+  const isReasoner = capabilities.requiresReasoningContentForToolCalls;
   if (isReasoner && result.messages && Array.isArray(result.messages)) {
     for (const msg of result.messages) {
       if (

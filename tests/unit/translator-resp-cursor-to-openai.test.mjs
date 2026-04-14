@@ -30,3 +30,18 @@ test("Cursor -> OpenAI response translator returns unknown objects unchanged", (
 test("Cursor -> OpenAI response translator ignores null chunks", () => {
   assert.equal(convertCursorToOpenAI(null, {}), null);
 });
+
+test("Cursor -> OpenAI response translator normalizes stop finish_reason when tool calls exist", () => {
+  const chunk = {
+    object: "chat.completion.chunk",
+    choices: [
+      {
+        index: 0,
+        delta: { tool_calls: [{ id: "call_1", function: { name: "read", arguments: "{}" } }] },
+        finish_reason: "stop",
+      },
+    ],
+  };
+
+  assert.equal(convertCursorToOpenAI(chunk, {}).choices[0].finish_reason, "tool_calls");
+});

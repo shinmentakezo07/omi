@@ -109,7 +109,12 @@ function markMessageCacheControl(msg, ttl) {
 // - Filter empty messages
 // - Add thinking block for Anthropic endpoint (provider === "claude")
 // - Fix tool_use/tool_result ordering
-export function prepareClaudeRequest(body, provider = null, preserveCacheControl = false) {
+export function prepareClaudeRequest(
+  body,
+  provider = null,
+  preserveCacheControl = false,
+  capabilities = null
+) {
   // 1. System: remove all cache_control, add only to last block with ttl 1h
   // In passthrough mode, preserve existing cache_control markers
   if (body.system && Array.isArray(body.system) && !preserveCacheControl) {
@@ -146,17 +151,17 @@ export function prepareClaudeRequest(body, provider = null, preserveCacheControl
       }
     }
 
-    // Pass 1.4: Filter out tool_use blocks with empty names (causes Claude 400 error)
-    // Apply to ALL roles (assistant tool_use + any user messages that may carry tool_use)
-    // Also filter tool_result blocks with missing tool_use_id
+    // Pass 1.4: Filter out invalid tool blocks and optionally empty text blocks
     for (const msg of filtered) {
       if (Array.isArray(msg.content)) {
-        msg.content = msg.content.filter(
-          (block) => block.type !== "tool_use" || (block.name && block.name?.trim())
-        );
-        msg.content = msg.content.filter(
-          (block) => block.type !== "tool_result" || block.tool_use_id
-        );
+        msg.content = msg.content.filter((block) => {
+          if (block.type === "tool_use") return Boolean(block.name && block.name?.trim());
+          if (block.type === "tool_result") return Boolean(block.tool_use_id);
+          if (capabilities?.rejectsEmptyTextBlocks && block.type === "text") {
+            return Boolean(typeof block.text === "string" && block.text.trim());
+          }
+          return true;
+        });
       }
     }
 

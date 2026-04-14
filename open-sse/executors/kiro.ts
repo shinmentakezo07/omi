@@ -8,6 +8,7 @@ import {
 import { PROVIDERS } from "../config/constants.ts";
 import { v4 as uuidv4 } from "uuid";
 import { refreshKiroToken } from "../services/tokenRefresh.ts";
+import { normalizeOpenAIFinishReason } from "../translator/helpers/finishReasonHelper.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -319,7 +320,9 @@ export class KiroExecutor extends BaseExecutor {
                 {
                   index: 0,
                   delta: {},
-                  finish_reason: state.hasToolCalls ? "tool_calls" : "stop",
+                  finish_reason: normalizeOpenAIFinishReason("stop", null, {
+                    forceToolCalls: state.hasToolCalls,
+                  }),
                 },
               ],
             };
@@ -419,7 +422,9 @@ export class KiroExecutor extends BaseExecutor {
                 {
                   index: 0,
                   delta: {},
-                  finish_reason: state.hasToolCalls ? "tool_calls" : "stop",
+                  finish_reason: normalizeOpenAIFinishReason("stop", null, {
+                    forceToolCalls: state.hasToolCalls,
+                  }),
                 },
               ],
             };
@@ -453,7 +458,9 @@ export class KiroExecutor extends BaseExecutor {
               {
                 index: 0,
                 delta: {},
-                finish_reason: state.hasToolCalls ? "tool_calls" : "stop",
+                finish_reason: normalizeOpenAIFinishReason("stop", null, {
+                  forceToolCalls: state.hasToolCalls,
+                }),
               },
             ],
           };

@@ -242,8 +242,6 @@ test("Responses -> OpenAI: empty-name tool call is deferred until output_item.do
   );
 });
 
-
-
 test("Responses -> OpenAI: interleaved tool-call deltas stay attached to the correct call", () => {
   const state = {};
 
@@ -290,3 +288,15 @@ test("Responses -> OpenAI: interleaved tool-call deltas stay attached to the cor
   assert.equal(secondArgs.choices[0].delta.tool_calls[0].function.arguments, '{"b":2}');
 });
 
+test("Responses -> OpenAI: flush on null uses tool_calls when function calls were seen", () => {
+  const state = {};
+  openaiResponsesToOpenAIResponse(
+    {
+      type: "response.output_item.added",
+      item: { type: "function_call", call_id: "call_1", name: "read_file" },
+    },
+    state
+  );
+  const final = openaiResponsesToOpenAIResponse(null, state);
+  assert.equal(final.choices[0].finish_reason, "tool_calls");
+});

@@ -1,5 +1,6 @@
 import crypto, { randomUUID } from "crypto";
 import { BaseExecutor, mergeUpstreamExtraHeaders } from "./base.ts";
+import { normalizeOpenAIFinishReason } from "../translator/helpers/finishReasonHelper.ts";
 import { PROVIDERS, OAUTH_ENDPOINTS, HTTP_STATUS } from "../config/constants.ts";
 
 const MAX_RETRY_AFTER_MS = 60_000;
@@ -303,7 +304,11 @@ export class AntigravityExecutor extends BaseExecutor {
           {
             index: 0,
             message: { role: "assistant", content: textContent },
-            finish_reason: timedOut ? "length" : finishReason,
+            finish_reason: timedOut
+              ? "length"
+              : normalizeOpenAIFinishReason(finishReason, {
+                  choices: [{ message: { tool_calls: [] } }],
+                }),
           },
         ],
         ...(usage && { usage }),

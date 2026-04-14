@@ -1,5 +1,6 @@
 import { PROVIDERS } from "../config/constants.ts";
 import { getRegistryEntry } from "../config/providerRegistry.ts";
+import { getProviderToolCapabilities as getTranslatorToolCapabilities } from "../translator/helpers/providerToolCapabilities.ts";
 import {
   buildClaudeCodeCompatibleHeaders,
   CLAUDE_CODE_COMPATIBLE_DEFAULT_CHAT_PATH,
@@ -378,4 +379,8 @@ export function normalizeThinkingConfig(body) {
     delete body.thinking;
   }
   return body;
+}
+
+export function getProviderToolCapabilities(provider?: string | null, model?: string | null) {
+  return getTranslatorToolCapabilities(provider, model);
 }

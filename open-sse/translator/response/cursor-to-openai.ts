@@ -4,6 +4,7 @@
  */
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
+import { normalizeOpenAIFinishReason } from "../helpers/finishReasonHelper.ts";
 
 /**
  * Convert Cursor response to OpenAI format
@@ -15,11 +16,19 @@ export function convertCursorToOpenAI(chunk, state) {
 
   // If chunk is already in OpenAI format (from executor transform), return as-is
   if (chunk.object === "chat.completion.chunk" && chunk.choices) {
+    const choice = chunk.choices?.[0];
+    if (choice?.finish_reason) {
+      choice.finish_reason = normalizeOpenAIFinishReason(choice.finish_reason, chunk);
+    }
     return chunk;
   }
 
   // If chunk is a completion object (non-streaming), return as-is
   if (chunk.object === "chat.completion" && chunk.choices) {
+    const choice = chunk.choices?.[0];
+    if (choice?.finish_reason) {
+      choice.finish_reason = normalizeOpenAIFinishReason(choice.finish_reason, chunk);
+    }
     return chunk;
   }
 
